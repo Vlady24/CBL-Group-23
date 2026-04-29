@@ -1,0 +1,34 @@
+# OS Generated Files
+.DS_Store
+Thumbs.db
+
+# Python Virtual Environments
+.venv/
+venv/
+env/
+
+# Python Cache
+__pycache__/
+*.pyc
+
+# IDE Settings
+.vscode/
+.idea/
+
+# Ignore all raw, intermediate, and cleaned data folders
+2026-02/
+police_data_by_force/
+police_data_cleaned/
+
+# Ignore all large data file types generally
+*.csv
+*.tsv
+*.xlsx
+*.zip
+*.tar.gz
+*.parquet
+
+# Ignore the folder where we dumped all those matplotlib charts
+eda_graphs/
+*.png
+*.jpg
