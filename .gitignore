@@ -27,8 +27,12 @@ police_data_cleaned/
 *.zip
 *.tar.gz
 *.parquet
+*.ods
 
 # Ignore the folder where we dumped all those matplotlib charts
 eda_graphs/
 *.png
 *.jpg
+
+# --- EXCEPTIONS (Force Git to track these files) ---
+!historical_capacity_merged.csv
