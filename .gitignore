@@ -19,6 +19,7 @@ __pycache__/
 2026-02/
 police_data_by_force/
 police_data_cleaned/
+all_data/
 
 # Ignore all large data file types generally
 *.csv
@@ -28,6 +29,7 @@ police_data_cleaned/
 *.tar.gz
 *.parquet
 *.ods
+*.db
 
 # Ignore the folder where we dumped all those matplotlib charts
 eda_graphs/
