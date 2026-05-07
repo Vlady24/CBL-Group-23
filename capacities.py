@@ -1,4 +1,6 @@
 import pandas as pd
+import sqlite3
+from pathlib import Path
 
 # reads .odf file and extracts the following:
 # force name + FTE for sep24, mar25, sep25
@@ -59,3 +61,12 @@ def merge_and_export(filepath1 : str, filepath2 : str):
 merge_and_export('other_data/historical_capacity_baseline_Table_1.csv', 
                  'other_data/historical_capacity_baseline_Table_3.csv')
 
+# add the table with polioce force capacities to the database 
+
+df = pd.read_csv("CBL-Group-23/other_data/historical_capacity_merged.csv")
+conn = sqlite3.connect("CBL-Group-23/crime_data.db")
+
+df.to_sql("capacity", conn, if_exists = "replace", index = False)
+
+conn.commit()
+conn.close()
