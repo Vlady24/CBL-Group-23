@@ -1,44 +1,84 @@
 # Still needs to be better adjusted for the project
-
-import numpy as np
-import pandas as pd
-
 import requests
-import xml.etree.ElementTree as ET
-from tqdm import tqdm
+import polyline
 
+import os
+from dotenv import load_dotenv
 
+parent_dir = os.path.dirname(os.path.dirname(__file__))
+env_path = os.path.join(parent_dir, 'important_stuff_APIs', '.env')
+load_dotenv(dotenv_path=env_path)
 
-def calculate_route(source, dest):
-    start = "{},{}".format(source[0], source[1])
-    end = "{},{}".format(dest[0], dest[1])
-    url = 'http://router.project-osrm.org/route/v1/driving/{};{}?alternatives=false&annotations=nodes'.format(start, end)
+api_key = os.getenv("GOOGLE_MAPS_API_KEY")
 
+# OpenStreetsMaps
+def calculate_route_osm(source, dest):
+    start = f"{source[0]},{source[1]}"
+    end = f"{dest[0]},{dest[1]}"
 
-    headers = { 'Content-type': 'application/json'}
-    r = requests.get(url, headers = headers)
-    print("Calling API ...:", r.status_code) # Status Code 200 is success
+    url = (
+        f"http://router.project-osrm.org/route/v1/driving/"
+        f"{start};{end}"
+        f"?overview=full&geometries=geojson"
+    )
 
+    response = requests.get(url)
 
-    routejson = r.json()
-    route_nodes = routejson['routes'][0]['legs'][0]['annotation']['nodes']
+    if response.status_code != 200:
+        raise Exception(f"API Error: {response.status_code}")
 
-    # keeping every third element in the node list to optimise time
-    route_list = []
-    for i in range(0, len(route_nodes)):
-        if i % 3==1:
-            route_list.append(route_nodes[i])
+    data = response.json()
 
-    coordinates = []
+    route = data['routes'][0]
+    coordinates = route['geometry']['coordinates']
 
-    for node in tqdm(route_list):
-        try:
-            url = 'https://api.openstreetmap.org/api/0.6/node/' + str(node)
-            r = requests.get(url, headers = headers)
-            myroot = ET.fromstring(r.text)
-            for child in myroot:
-                lat, long = child.attrib['lat'], child.attrib['lon']
-            coordinates.append((lat, long))
-        except:
-            continue
-    print(coordinates[:10])
+    return coordinates
+
+# Google Maps
+def calculate_route_gm(source, dest):
+    url = "https://routes.googleapis.com/directions/v2:computeRoutes"
+
+    headers = {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": api_key,
+        "X-Goog-FieldMask": (
+            "routes.distanceMeters,"
+            "routes.duration,"
+            "routes.polyline.encodedPolyline"
+        )
+    }
+
+    body = {
+        "origin": {
+            "location": {
+                "latLng": {
+                    "latitude": source[1],
+                    "longitude": source[0]
+                }
+            }
+        },
+        "destination": {
+            "location": {
+                "latLng": {
+                    "latitude": dest[1],
+                    "longitude": dest[0]
+                }
+            }
+        },
+        "travelMode": "DRIVE"
+    }
+
+    response = requests.post(url, headers=headers, json=body)
+    data = response.json()
+
+    route = data['routes'][0]
+    encoded = route['polyline']['encodedPolyline']
+
+    coordinates = polyline.decode(encoded)
+
+    return [(x[1], x[0]) for x in coordinates]
+
+source = (-83.920699, 35.96061) # Knoxville 
+dest  = (-73.973846, 40.71742)  # New York City
+
+print(calculate_route_gm(source, dest))
