@@ -6,6 +6,7 @@ Thumbs.db
 .venv/
 venv/
 env/
+.env
 
 # Python Cache
 __pycache__/
