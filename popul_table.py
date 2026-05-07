@@ -13,7 +13,7 @@ df.columns = ["lsoa_code", "population"]
 df = df.dropna()
 df["lsoa_code"] = df["lsoa_code"].str.strip()
 
-conn = sqlite3.connect("crime_data.sqlite")
+conn = sqlite3.connect("CBL-Group-23/crime_data.db")
 
 df.to_sql("population", conn, if_exists="replace", index=False)
 
