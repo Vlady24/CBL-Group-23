@@ -1,8 +1,9 @@
 import googlemaps
 from datetime import datetime
-
+import glob
 import os
 from dotenv import load_dotenv
+import pandas as pd
 
 # The distance matrix API is used according to the following information:
 #
@@ -23,21 +24,36 @@ api_key = os.getenv("GOOGLE_MAPS_API_KEY")
 gmaps = googlemaps.Client(key=api_key)
 
 # API request and matrix construction
+# updated with batch chunking due to API limit
 def get_live_matrix(station, lsoas):
-    print('Getting live traffic data from google maps')
+    print("Getting live traffic data from Google Maps")
 
     # combine the station and LSOAs into a single list of nodes
-    # node 0 is always the station
-    # nodes from 1 to H are the LSOAs
     all_nodes = [station] + lsoas
+    total_nodes = len(all_nodes)
 
-    # API request
-    matrix_response = gmaps.distance_matrix(
-        origins=all_nodes,
-        destinations=all_nodes,
-        mode="driving",
-        departure_time=datetime.now()
-    )
+    # Standard API limit is 100 elements per request.
+    # We dynamically calculate how many origins we can send per batch against all destinations.
+    max_origins_per_chunk = 100 // total_nodes
+
+    master_rows = []
+
+    # Chunk through the origins safely
+    for i in range(0, total_nodes, max_origins_per_chunk):
+        origin_chunk = all_nodes[i : i + max_origins_per_chunk]
+
+        matrix_chunk = gmaps.distance_matrix(
+            origins=origin_chunk,
+            destinations=all_nodes,
+            mode="driving",
+            departure_time=datetime.now(),
+        )
+
+        # extend our master list with the rows from this batch
+        master_rows.extend(matrix_chunk["rows"])
+
+    # reconstruct unified response payload
+    matrix_response = {"rows": master_rows, "status": "OK"}
 
     return matrix_response, all_nodes
 
@@ -119,4 +135,148 @@ def test_with_dummy():
         else:
             print(f"{step}. LSOA Hotspot: {coords}")
 
-test_with_dummy()
+# test_with_dummy()
+
+# Reads the raw merged CSV files for Greater London
+# applies severity weights, and extracts the top high-crime LSOAs.
+def get_london_hotspots_from_csv(csv_folder, limit=15):
+    print(f"Reading local CSV files to extract the top {limit} Greater London hotspots")
+
+    # defining public safety weights
+    weights = {
+        "Violence and sexual offences": 10,
+        "Robbery": 8,
+        "Possession of weapons": 8,
+        "Burglary": 7,
+        "Drugs": 5,
+        "Criminal damage and arson": 4,
+        "Public order": 4,
+        "Vehicle crime": 3,
+        "Theft from the person": 3,
+        "Shoplifting": 2,
+        "Anti-social behaviour": 2,
+        "Other crime": 2,
+    }
+
+    # matching the exact headers from raw files
+    needed_cols = [
+        "LSOA code",
+        "LSOA name",
+        "Latitude",
+        "Longitude",
+        "Crime type",
+    ]
+    london_dfs = []
+
+    file_patterns = ["*metropolitan*.csv", "*city*london*.csv"]
+
+    for pattern in file_patterns:
+        search_path = os.path.join(csv_folder, pattern)
+        matching_files = glob.glob(search_path)
+
+        if not matching_files:
+            print(f"Warning: no CSV file found matching: {pattern}")
+            continue
+
+        file_path = matching_files[0]
+        try:
+            # reading exact columns, dropping rows missing GPS coordinates
+            df = pd.read_csv(file_path, usecols=needed_cols).dropna(
+                subset=["Latitude", "Longitude", "LSOA code"]
+            )
+            london_dfs.append(df)
+            print(f"Successfully loaded: {os.path.basename(file_path)}")
+        except Exception as e:
+            print(f"Error reading {file_path}: {e}")
+
+    if not london_dfs:
+        raise FileNotFoundError(
+            "\n Error: could not load any London CSV files.\n"
+            f"Please verify your files exist inside: {csv_folder}"
+        )
+
+    # concatenate
+    full_df = pd.concat(london_dfs, ignore_index=True)
+
+    # mapping the weights (defaulting to 1 for unlisted volume crimes)
+    full_df["severity_weight"] = (
+        full_df["Crime type"].map(weights).fillna(1).astype(int)
+    )
+
+    # grouping by exact original LSOA headers to sum up the score
+    hotspots = (
+        full_df.groupby(["LSOA code", "LSOA name", "Latitude", "Longitude"])[
+            "severity_weight"
+        ]
+        .sum()
+        .reset_index()
+    )
+
+    # standardizing output names so routing code doesn't break
+    hotspots = hotspots.rename(
+        columns={
+            "LSOA code": "lsoa_code",
+            "LSOA name": "lsoa_name",
+            "Latitude": "latitude",
+            "Longitude": "longitude",
+            "severity_weight": "severity_score",
+        }
+    )
+
+    top_hotspots = hotspots.sort_values(
+        by="severity_score", ascending=False
+    ).head(limit)
+
+    return top_hotspots
+
+
+# testing using real CSV targets from the cleaned folder
+def run_csv_patrol():
+    parent_dir = os.path.dirname(os.path.dirname(__file__))
+    csv_folder = os.path.join(parent_dir, "police_data_cleaned")
+
+    # fetching real target data from the pre-cleaned files
+    hotspots_df = get_london_hotspots_from_csv(csv_folder, limit=15)
+
+    # Central London Depot station coordinates
+    police_station = {
+        "lat": 51.5074,
+        "lng": -0.1278,
+        "name": "Central Station Depot",
+    }
+
+    target_lsoas = []
+    for _, row in hotspots_df.iterrows():
+        target_lsoas.append(
+            {
+                "lat": row["latitude"],
+                "lng": row["longitude"],
+                "name": row["lsoa_name"],
+                "score": row["severity_score"],
+            }
+        )
+
+    # executing existing network request
+    matrix, nodes = get_live_matrix(police_station, target_lsoas)
+
+    # executing existing TSP computation
+    results = calculate_active_deterrence_route(matrix, nodes)
+
+    # output
+    print(
+        f"\nTotal Patrol Time: {results['total_route_time_minutes']} minutes"
+    )
+    print("Optimal London Visiting Order:")
+
+    for step, node in enumerate(results["master_patrol_loop"]):
+        if step == 0 or step == len(results["master_patrol_loop"]) - 1:
+            print(
+                f"{step}. Depot: {node['name']} ({node['lat']}, {node['lng']})"
+            )
+        else:
+            print(
+                f"{step}. Patrol Target: {node['name']} [Severity Score: {node['score']}]"
+            )
+
+if __name__ == "__main__":
+    run_csv_patrol()
