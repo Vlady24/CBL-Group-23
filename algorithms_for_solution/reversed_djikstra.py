@@ -1,6 +1,6 @@
 # Still needs to be better adjusted for the project
-import requests
 import polyline
+import googlemaps
 
 import os
 from dotenv import load_dotenv
@@ -10,75 +10,48 @@ env_path = os.path.join(parent_dir, 'important_stuff_APIs', '.env')
 load_dotenv(dotenv_path=env_path)
 
 api_key = os.getenv("GOOGLE_MAPS_API_KEY")
+gmaps = googlemaps.Client(key=api_key)
 
-# OpenStreetsMaps
-def calculate_route_osm(source, dest):
-    start = f"{source[0]},{source[1]}"
-    end = f"{dest[0]},{dest[1]}"
+def find_nearest_officer(officers, dest):
+    routes = {}
 
-    url = (
-        f"http://router.project-osrm.org/route/v1/driving/"
-        f"{start};{end}"
-        f"?overview=full&geometries=geojson"
+    for i in range(len(officers)):
+        directions = gmaps.directions(
+            officers[i],
+            dest,
+            mode="driving",
+            departure_time="now"
+        )
+
+        route = directions[0]
+        leg = route["legs"][0]
+        officer_route = polyline.decode(route["overview_polyline"]["points"])
+
+        routes[i] = {
+            "traffic_duration_s": leg["duration_in_traffic"]["value"],
+            "route": officer_route
+        }
+
+    fastest_driver = min(
+        routes,
+        key=lambda d: routes[d]["traffic_duration_s"]
     )
 
-    response = requests.get(url)
+    return {"Nearest officer": fastest_driver,
+            "Optimal route": routes[fastest_driver]["route"]}
 
-    if response.status_code != 200:
-        raise Exception(f"API Error: {response.status_code}")
-
-    data = response.json()
-
-    route = data['routes'][0]
-    coordinates = route['geometry']['coordinates']
-
-    return coordinates
-
-# Google Maps
-def calculate_route_gm(source, dest):
-    url = "https://routes.googleapis.com/directions/v2:computeRoutes"
-
-    headers = {
-        "Content-Type": "application/json",
-        "X-Goog-Api-Key": api_key,
-        "X-Goog-FieldMask": (
-            "routes.distanceMeters,"
-            "routes.duration,"
-            "routes.polyline.encodedPolyline"
-        )
+def test_find_nearest_officer():
+    officers = {
+        0: (51.9244, 4.4777),
+        1: (52.3676, 4.9041),
+        2: (51.5719, 4.7683)
     }
 
-    body = {
-        "origin": {
-            "location": {
-                "latLng": {
-                    "latitude": source[1],
-                    "longitude": source[0]
-                }
-            }
-        },
-        "destination": {
-            "location": {
-                "latLng": {
-                    "latitude": dest[1],
-                    "longitude": dest[0]
-                }
-            }
-        },
-        "travelMode": "DRIVE"
-    }
+    dest  = (51.4416, 5.4697)
+    result = find_nearest_officer(officers, dest)
 
-    response = requests.post(url, headers=headers, json=body)
-    data = response.json()
+    for i in result:
+        print(f"{i} : {result[i]}")
+        print("")
 
-    route = data['routes'][0]
-    encoded = route['polyline']['encodedPolyline']
-
-    coordinates = polyline.decode(encoded)
-
-    return [(x[1], x[0]) for x in coordinates]
-
-source = (-83.920699, 35.96061) # Knoxville 
-dest  = (-73.973846, 40.71742)  # New York City
-
-print(calculate_route_gm(source, dest))
+test_find_nearest_officer()
