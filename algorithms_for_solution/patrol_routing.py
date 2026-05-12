@@ -109,38 +109,10 @@ def calculate_active_deterrence_route(matrix_response, all_nodes):
     }
 
 
-# testing using dummy coordinates
-def test_with_dummy():
-    police_station = (51.509865, -0.118092)
-
-    target_lsoas = [
-        (51.512344, -0.124567), # Hotspot 1
-        (51.507890, -0.135678), # Hotspot 2
-        (51.515678, -0.112345), # Hotspot 3
-        (51.501234, -0.145678)  # Hotspot 4
-    ]
-
-    # network
-    matrix, nodes = get_live_matrix(police_station, target_lsoas)
-
-    # computation
-    results = calculate_active_deterrence_route(matrix, nodes)
-
-    print(f"Total Patrol Time: {results['total_route_time_minutes']} minutes")
-    print("Optimal Visiting Order:")
-
-    for step, coords in enumerate(results['master_patrol_loop']):
-        if step == 0 or step == len(results['master_patrol_loop']) - 1:
-            print(f"{step}. station: {coords}")
-        else:
-            print(f"{step}. LSOA Hotspot: {coords}")
-
-# test_with_dummy()
-
-# Reads the raw merged CSV files for Greater London
+# Reads the raw merged CSV files for West Midlands Police
 # applies severity weights, and extracts the top high-crime LSOAs.
-def get_london_hotspots_from_csv(csv_folder, limit=15):
-    print(f"Reading local CSV files to extract the top {limit} Greater London hotspots")
+def get_hotspots_from_csv(csv_folder, limit=15):
+    print(f"Reading local CSV files to extract the top {limit} Birmingham (West Midlands) hotspots")
 
     # defining public safety weights
     weights = {
@@ -166,9 +138,10 @@ def get_london_hotspots_from_csv(csv_folder, limit=15):
         "Longitude",
         "Crime type",
     ]
-    london_dfs = []
+    target_dfs = []
 
-    file_patterns = ["*metropolitan*.csv", "*city*london*.csv"]
+    # Targeting West Midlands Police files explicitly via glob matching logic
+    file_patterns = ["*west*midlands*.csv"]
 
     for pattern in file_patterns:
         search_path = os.path.join(csv_folder, pattern)
@@ -184,19 +157,20 @@ def get_london_hotspots_from_csv(csv_folder, limit=15):
             df = pd.read_csv(file_path, usecols=needed_cols).dropna(
                 subset=["Latitude", "Longitude", "LSOA code"]
             )
-            london_dfs.append(df)
+            target_dfs.append(df)
             print(f"Successfully loaded: {os.path.basename(file_path)}")
+
         except Exception as e:
             print(f"Error reading {file_path}: {e}")
 
-    if not london_dfs:
+    if not target_dfs:
         raise FileNotFoundError(
-            "\n Error: could not load any London CSV files.\n"
+            "\n Error: could not load any West Midlands CSV files.\n"
             f"Please verify your files exist inside: {csv_folder}"
         )
 
     # concatenate
-    full_df = pd.concat(london_dfs, ignore_index=True)
+    full_df = pd.concat(target_dfs, ignore_index=True)
 
     # mapping the weights (defaulting to 1 for unlisted volume crimes)
     full_df["severity_weight"] = (
@@ -236,13 +210,13 @@ def run_csv_patrol():
     csv_folder = os.path.join(parent_dir, "police_data_cleaned")
 
     # fetching real target data from the pre-cleaned files
-    hotspots_df = get_london_hotspots_from_csv(csv_folder, limit=15)
+    hotspots_df = get_hotspots_from_csv(csv_folder, limit=15)
 
-    # Central London Depot station coordinates
+    # Birmingham Central Depot station coordinates (Lloyd House HQ)
     police_station = {
-        "lat": 51.5074,
-        "lng": -0.1278,
-        "name": "Central Station Depot",
+        "lat": 52.4831,
+        "lng": -1.8966,
+        "name": "Birmingham Central HQ Depot",
     }
 
     target_lsoas = []
@@ -266,7 +240,7 @@ def run_csv_patrol():
     print(
         f"\nTotal Patrol Time: {results['total_route_time_minutes']} minutes"
     )
-    print("Optimal London Visiting Order:")
+    print("Optimal Birmingham Visiting Order:")
 
     for step, node in enumerate(results["master_patrol_loop"]):
         if step == 0 or step == len(results["master_patrol_loop"]) - 1:
