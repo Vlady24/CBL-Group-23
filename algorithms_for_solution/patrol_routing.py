@@ -110,7 +110,7 @@ def calculate_active_deterrence_route(matrix_response, all_nodes):
 
 
 # Reads the raw merged CSV files for West Midlands Police
-# applies severity weights, and extracts the top high-crime LSOAs.
+# applies severity weights, and extracts the top high-crime LSOAs without duplicates.
 def get_hotspots_from_csv(csv_folder, limit=15):
     print(f"Reading local CSV files to extract the top {limit} Birmingham (West Midlands) hotspots")
 
@@ -140,7 +140,7 @@ def get_hotspots_from_csv(csv_folder, limit=15):
     ]
     target_dfs = []
 
-    # Targeting West Midlands Police files explicitly via glob matching logic
+    # targeting West Midlands Police files explicitly via glob matching logic
     file_patterns = ["*west*midlands*.csv"]
 
     for pattern in file_patterns:
@@ -159,7 +159,6 @@ def get_hotspots_from_csv(csv_folder, limit=15):
             )
             target_dfs.append(df)
             print(f"Successfully loaded: {os.path.basename(file_path)}")
-
         except Exception as e:
             print(f"Error reading {file_path}: {e}")
 
@@ -177,12 +176,16 @@ def get_hotspots_from_csv(csv_folder, limit=15):
         full_df["Crime type"].map(weights).fillna(1).astype(int)
     )
 
-    # grouping by exact original LSOA headers to sum up the score
+   # group by LSOA only and average GPS
     hotspots = (
-        full_df.groupby(["LSOA code", "LSOA name", "Latitude", "Longitude"])[
-            "severity_weight"
-        ]
-        .sum()
+        full_df.groupby(["LSOA code", "LSOA name"])
+        .agg(
+            {
+                "severity_weight": "sum",
+                "Latitude": "mean",
+                "Longitude": "mean",
+            }
+        )
         .reset_index()
     )
 
