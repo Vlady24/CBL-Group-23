@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import socketio
 from pydantic import BaseModel
 
-#from algorithms_for_solution import kmeans, patrol_routing, reversed_djikstra
+from algorithms_for_solution import patrol_routing, kmeans
 
 app = FastAPI(title="Active Deterrence Dispatch Server")
 
@@ -35,8 +35,19 @@ async def generate_daily_zones(data : OfficerAllocation):
     print(f"Running K-means to allocate {data.officers_available} officers")
 
     # import and call the K-means algorithm here
-
-    return {"status": "success", "message": "Zones generated", "zones": []}
+    try:
+        result = kmeans.run_kmeans(n_clusters = data.officers_available)
+        return {
+            "status" : "success",
+            "data" : result
+        }
+    
+    except Exception as e:
+        print(f"Error running K-Means: {e}")
+        return {
+            "status" : "error",
+            "message" : str(e)
+        }
 
 @app.post("/phase2/generate-route/{officer_id}")
 async def generate_patrol_route(officer_id : int):
@@ -44,8 +55,23 @@ async def generate_patrol_route(officer_id : int):
     print(f"Running TSP for Officer {officer_id}")
 
     # import and call TSP algorithm here
+    try:
+        patrol_routing.run_csv_patrol()
 
-    return {"status": "success", "officer_id": officer_id, "route": []}
+        return {
+            "status" : "success",
+            "officer_id" : officer_id,
+            "message" : "Patrol route calculated. Check server console for route details."
+        }
+    
+    except Exception as e:
+        # if the csv files are not found or the API fails
+        # we prevent the server from crashing
+        print(f"Error running TSP: {e}")
+        return {
+            "status" : "error",
+            "message" : str(e)
+        }
 
 # WebSocket Events (real-time communication)
 
