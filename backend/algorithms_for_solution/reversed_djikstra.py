@@ -6,7 +6,7 @@ import os
 from dotenv import load_dotenv
 
 parent_dir = os.path.dirname(os.path.dirname(__file__))
-env_path = os.path.join(parent_dir, 'important_stuff_APIs', '.env')
+env_path = os.path.join(parent_dir, '../important_stuff_APIs', '.env')
 load_dotenv(dotenv_path=env_path)
 
 api_key = os.getenv("GOOGLE_MAPS_API_KEY")

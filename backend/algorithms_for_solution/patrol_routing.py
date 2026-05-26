@@ -17,7 +17,7 @@ import pandas as pd
 # finding the exact path of the folder where the .env is located
 # go up one level to the parent directory, then into important_stuff_APIs
 parent_dir = os.path.dirname(os.path.dirname(__file__))
-env_path = os.path.join(parent_dir, 'important_stuff_APIs', '.env')
+env_path = os.path.join(parent_dir, '../important_stuff_APIs', '.env')
 load_dotenv(dotenv_path=env_path)
 
 api_key = os.getenv("GOOGLE_MAPS_API_KEY")
@@ -210,7 +210,7 @@ def get_hotspots_from_csv(csv_folder, limit=15):
 # testing using real CSV targets from the cleaned folder
 def run_csv_patrol():
     parent_dir = os.path.dirname(os.path.dirname(__file__))
-    csv_folder = os.path.join(parent_dir, "police_data_cleaned")
+    csv_folder = os.path.join(parent_dir, "../police_data_cleaned")
 
     # fetching real target data from the pre-cleaned files
     hotspots_df = get_hotspots_from_csv(csv_folder, limit=15)
