@@ -37,7 +37,10 @@ def find_nearest_officers(no_officers, officers, dest):
         key=lambda item: item[1]["traffic_duration_s"]
     )
 
-    return sorted_drivers[:no_officers]
+    result = [officers[element[0]] for element in sorted_drivers][:no_officers]
+    routes = [officers[element[1]] for element in sorted_drivers][:no_officers]
+
+    return result
 
 def test_find_nearest_officer():
     officers = {
@@ -47,10 +50,9 @@ def test_find_nearest_officer():
     }
 
     dest  = (51.4416, 5.4697)
-    result = find_nearest_officers(5, officers, dest)
+    result, routes = find_nearest_officers(2, officers, dest)
 
     for element in result:
-        print(element[0])
-        print(element[1])
+        print(f"Officer at location {element}")
 
 test_find_nearest_officer()
