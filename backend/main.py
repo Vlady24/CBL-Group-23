@@ -27,6 +27,14 @@ class EmergencyTrigger(BaseModel):
     lng : float
     officers_needed : int
 
+# dummy live police fleet coordinates for testing purposes
+live_police_fleet = {
+    "Car_101": (51.9244, 4.4777),
+    "Car_102": (52.3676, 4.9041),
+    "Car_103": (51.5719, 4.7683),
+    "Car_104": (51.4416, 5.4697)
+}
+
 # API endpoints
 
 @app.post("/phase1/generate-zones")
@@ -79,6 +87,22 @@ async def generate_patrol_route(officer_id : int):
 async def connect(sid, environ):
     print(f"Client connected: {sid}")
 
+@sio.on('update_location')
+async def update_car_location(sid, data):
+    # listens for live GPS ping from police cars on patrol
+
+    car_id = data.get('car_id')
+    lat = data.get('lat')
+    lng = data.get('lng')
+
+    if car_id and lat and lng:
+        # update car's coordinates in server's memory
+        live_police_fleet[car_id] = (lat, lng)
+        print(f"GPS Update: {car_id} moved to ({lat}, {lng})")
+
+        # broadcast the new location to dispatcher's map
+        await sio.emit('fleet_update', live_police_fleet)
+
 @sio.on('citizen_sos')
 async def handle_emergency(sid, data):
     # Trigger for phase 3: Reversed Dijkstra
@@ -101,4 +125,3 @@ async def disconnect(sid):
 # mounting the socket app
 # this ensures FastAPI and Socket.IO run on the same port
 app.mount("/", socket_app)
-
