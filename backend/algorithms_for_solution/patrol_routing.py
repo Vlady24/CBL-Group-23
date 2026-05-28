@@ -4,6 +4,7 @@ import glob
 import os
 from dotenv import load_dotenv
 import pandas as pd
+import sqlite3
 
 # The distance matrix API is used according to the following information:
 #
@@ -109,10 +110,9 @@ def calculate_active_deterrence_route(matrix_response, all_nodes):
     }
 
 
-# Reads the raw merged CSV files for West Midlands Police
-# applies severity weights, and extracts the top high-crime LSOAs without duplicates.
-def get_hotspots_from_csv(csv_folder, limit=15):
-    print(f"Reading local CSV files to extract the top {limit} Birmingham (West Midlands) hotspots")
+# Reads the sqlite database, applies severity weights, 
+# and extracts the top high-crime LSOAs without duplicates
+def get_hotspots_from_db(db_path, police_force, limit=15):
 
     # defining public safety weights
     weights = {
@@ -130,74 +130,39 @@ def get_hotspots_from_csv(csv_folder, limit=15):
         "Other crime": 2,
     }
 
-    # matching the exact headers from raw files
-    needed_cols = [
-        "LSOA code",
-        "LSOA name",
-        "Latitude",
-        "Longitude",
-        "Crime type",
-    ]
-    target_dfs = []
+    conn = sqlite3.connect(db_path)
 
-    # targeting West Midlands Police files explicitly via glob matching logic
-    file_patterns = ["*west*midlands*.csv"]
+    query = """select lsoa_code, lsoa_name, latitude, longitude, crime_type
+    from crimes
+    where reported_by = ?
+    and lsoa_code is not null
+    and lsoa_name is not null
+    and latitude is not null
+    and longitude is not null
+    and crime_type is not null
+    """
 
-    for pattern in file_patterns:
-        search_path = os.path.join(csv_folder, pattern)
-        matching_files = glob.glob(search_path)
+    df = pd.read_sql_query(query, conn, params=[police_force])
+    conn.close()
 
-        if not matching_files:
-            print(f"Warning: no CSV file found matching: {pattern}")
-            continue
-
-        file_path = matching_files[0]
-        try:
-            # reading exact columns, dropping rows missing GPS coordinates
-            df = pd.read_csv(file_path, usecols=needed_cols).dropna(
-                subset=["Latitude", "Longitude", "LSOA code"]
-            )
-            target_dfs.append(df)
-            print(f"Successfully loaded: {os.path.basename(file_path)}")
-        except Exception as e:
-            print(f"Error reading {file_path}: {e}")
-
-    if not target_dfs:
-        raise FileNotFoundError(
-            "\n Error: could not load any West Midlands CSV files.\n"
-            f"Please verify your files exist inside: {csv_folder}"
+    if df.empty:
+        raise ValueError(
+            f"No crime records found for police force: {police_force}. "
+            "Check the exact value in the reported_by column."
         )
 
-    # concatenate
-    full_df = pd.concat(target_dfs, ignore_index=True)
-
-    # mapping the weights (defaulting to 1 for unlisted volume crimes)
-    full_df["severity_weight"] = (
-        full_df["Crime type"].map(weights).fillna(1).astype(int)
+    df["severity_weight"] = (
+        df["crime_type"].map(weights).fillna(1).astype(int)
     )
 
-   # group by LSOA only and average GPS
     hotspots = (
-        full_df.groupby(["LSOA code", "LSOA name"])
+        df.groupby(["lsoa_code", "lsoa_name"])
         .agg(
-            {
-                "severity_weight": "sum",
-                "Latitude": "mean",
-                "Longitude": "mean",
-            }
+            severity_score=("severity_weight", "sum"),
+            latitude=("latitude", "mean"),
+            longitude=("longitude", "mean"),
         )
         .reset_index()
-    )
-
-    # standardizing output names so routing code doesn't break
-    hotspots = hotspots.rename(
-        columns={
-            "LSOA code": "lsoa_code",
-            "LSOA name": "lsoa_name",
-            "Latitude": "latitude",
-            "Longitude": "longitude",
-            "severity_weight": "severity_score",
-        }
     )
 
     top_hotspots = hotspots.sort_values(
@@ -207,22 +172,19 @@ def get_hotspots_from_csv(csv_folder, limit=15):
     return top_hotspots
 
 
-# testing using real CSV targets from the cleaned folder
-def run_csv_patrol():
-    parent_dir = os.path.dirname(os.path.dirname(__file__))
-    csv_folder = os.path.join(parent_dir, "../police_data_cleaned")
+# testing using crime data from the SQLite database
+def run_db_patrol(police_force, police_station, limit=15):
+    backend_dir = os.path.dirname(os.path.dirname(__file__))
+    db_path = os.path.join(backend_dir, "database", "crime_data.db")
 
-    # fetching real target data from the pre-cleaned files
-    hotspots_df = get_hotspots_from_csv(csv_folder, limit=15)
-
-    # Birmingham Central Depot station coordinates (Lloyd House HQ)
-    police_station = {
-        "lat": 52.4831,
-        "lng": -1.8966,
-        "name": "Birmingham Central HQ Depot",
-    }
+    hotspots_df = get_hotspots_from_db(
+        db_path=db_path,
+        police_force=police_force,
+        limit=limit
+    )
 
     target_lsoas = []
+
     for _, row in hotspots_df.iterrows():
         target_lsoas.append(
             {
@@ -233,27 +195,28 @@ def run_csv_patrol():
             }
         )
 
-    # executing existing network request
     matrix, nodes = get_live_matrix(police_station, target_lsoas)
 
-    # executing existing TSP computation
     results = calculate_active_deterrence_route(matrix, nodes)
 
-    # output
-    print(
-        f"\nTotal Patrol Time: {results['total_route_time_minutes']} minutes"
-    )
-    print("Optimal Birmingham Visiting Order:")
+    print(f"\nPolice force: {police_force}")
+    print(f"Total Patrol Time: {results['total_route_time_minutes']} minutes")
+    print("Optimal Visiting Order:")
 
     for step, node in enumerate(results["master_patrol_loop"]):
         if step == 0 or step == len(results["master_patrol_loop"]) - 1:
-            print(
-                f"{step}. Depot: {node['name']} ({node['lat']}, {node['lng']})"
-            )
+            print(f"{step}. Depot: {node['name']} ({node['lat']}, {node['lng']})")
         else:
-            print(
-                f"{step}. Patrol Target: {node['name']} [Severity Score: {node['score']}]"
-            )
+            print(f"{step}. Patrol Target: {node['name']} [Severity Score: {node['score']}]")
 
+    return results
+
+
+# test for the West Midlands Police, but do not hardcode it in functions
 if __name__ == "__main__":
-    run_csv_patrol()
+    police_station = {
+        "lat": 52.4831,
+        "lng": -1.8966,
+        "name": "Birmingham Central HQ Depot"}
+
+    run_db_patrol(police_force = "West Midlands Police", police_station = police_station, limit = 15)   
