@@ -1,4 +1,3 @@
-# Still needs to be better adjusted for the project
 import polyline
 import googlemaps
 
@@ -12,7 +11,8 @@ load_dotenv(dotenv_path=env_path)
 api_key = os.getenv("GOOGLE_MAPS_API_KEY")
 gmaps = googlemaps.Client(key=api_key)
 
-def find_nearest_officer(officers, dest):
+def find_nearest_officers(no_officers, officers, dest):
+    assert no_officers <= len(officers), "The required officers for a case should be less than or equal than the number of officers on active duty"
     routes = {}
 
     for i in range(len(officers)):
@@ -32,13 +32,15 @@ def find_nearest_officer(officers, dest):
             "route": officer_route
         }
 
-    fastest_driver = min(
-        routes,
-        key=lambda d: routes[d]["traffic_duration_s"]
+    sorted_drivers = sorted(
+        routes.items(),
+        key=lambda item: item[1]["traffic_duration_s"]
     )
 
-    return {"Nearest officer": fastest_driver,
-            "Optimal route": routes[fastest_driver]["route"]}
+    result = [officers[element[0]] for element in sorted_drivers][:no_officers]
+    routes = [officers[element[1]] for element in sorted_drivers][:no_officers]
+
+    return result
 
 def test_find_nearest_officer():
     officers = {
@@ -48,10 +50,9 @@ def test_find_nearest_officer():
     }
 
     dest  = (51.4416, 5.4697)
-    result = find_nearest_officer(officers, dest)
+    result, routes = find_nearest_officers(2, officers, dest)
 
-    for i in result:
-        print(f"{i} : {result[i]}")
-        print("")
+    for element in result:
+        print(f"Officer at location {element}")
 
 test_find_nearest_officer()
