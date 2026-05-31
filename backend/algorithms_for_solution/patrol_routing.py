@@ -118,16 +118,16 @@ def get_hotspots_from_db(db_path, police_force, limit=15):
     weights = {
         "Violence and sexual offences": 10,
         "Robbery": 8,
-        "Possession of weapons": 8,
-        "Burglary": 7,
-        "Drugs": 5,
-        "Criminal damage and arson": 4,
-        "Public order": 4,
+        "Possession of weapons": 9,
+        "Burglary": 6.5,
+        "Drugs": 6.5,
+        "Criminal damage and arson": 6.5,
+        "Public order": 3.5,
         "Vehicle crime": 3,
         "Theft from the person": 3,
-        "Shoplifting": 2,
-        "Anti-social behaviour": 2,
-        "Other crime": 2,
+        "Shoplifting": 1.5,
+        "Anti-social behaviour": 3.5,
+        "Other crime": 5,
     }
 
     conn = sqlite3.connect(db_path)
