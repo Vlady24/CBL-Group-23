@@ -1,7 +1,10 @@
 import { useState } from "react";
 import { APIProvider } from "@vis.gl/react-google-maps";
 import AddressAutocomplete from "./components/AddressAutocomplete";
+import io from "socket.io-client";
 import "./App.css";
+
+const socket = io("http://localhost:8000");
 
 function App() {
   const [screen, setScreen] = useState("home");
@@ -93,6 +96,14 @@ function App() {
       addressText: addressText,
       reporter: "Verified reporter #0241"
     };
+
+    const backendPayload = {
+      lat : Number(latitude),
+      lng : Number(longitude),
+      officers_needed : 2 // hardcoded temporarily
+    }
+
+    socket.emit('citizen_sos', backendPayload)
 
     setReports([report, ...reports]);
 

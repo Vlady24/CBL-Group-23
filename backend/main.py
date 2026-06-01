@@ -15,8 +15,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Initialize Socket.IO with ASGI mode and CORS
 sio = socketio.AsyncServer(async_mode='asgi', cors_allowed_origins='*')
-socket_app = socketio.ASGIApp(sio, app)
 
 # Data Models
 class OfficerAllocation(BaseModel):
@@ -133,6 +133,4 @@ async def handle_emergency(sid, data):
 async def disconnect(sid):
     print(f"Client disconnected: {sid}")
 
-# mounting the socket app
-# this ensures FastAPI and Socket.IO run on the same port
-app.mount("/", socket_app)
+app = socketio.ASGIApp(sio, other_asgi_app=app)
