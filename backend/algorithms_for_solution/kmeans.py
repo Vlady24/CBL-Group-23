@@ -32,7 +32,7 @@ def run_kmeans(n_clusters=4):
             "error" : "Could not connect to database"
         }
 
-    os.makedirs("../visualizations", exist_ok= True)
+    # os.makedirs("../visualizations", exist_ok= True)
     os.makedirs("algorithms_for_solution", exist_ok = True)
 
     df["month"] = pd.to_datetime(df["month"])
@@ -110,34 +110,34 @@ def run_kmeans(n_clusters=4):
     lsoa_features["summer_winter_ratio"] = lsoa_features["summer_winter_ratio"].fillna(0)
 
     #plot feature distrs to check skewness 
-    fig, ax = plt.subplots(2, 2, figsize = (12, 8))
+    # fig, ax = plt.subplots(2, 2, figsize = (12, 8))
 
-    ax[0, 0].hist(lsoa_features["monthly_mean_rate_per_1000"], bins = 50)
-    ax[0, 0].set_title("monthly_mean_rate_per_1000")
-    ax[0, 1].hist(lsoa_features["log_monthly_mean_rate_per_1000"], bins = 50)
-    ax[0, 1].set_title("log_monthly_mean_rate_per_1000")
-    ax[1, 0].hist(lsoa_features["coefficient_of_variation"], bins = 50)
-    ax[1, 0].set_title("coefficient_of_variation")
-    ax[1, 1].hist(lsoa_features["summer_winter_ratio"], bins= 50)
-    ax[1, 1].set_title("summer_winter_ratio")
-    plt.tight_layout()
-    plt.savefig("../visualizations/feature_distrs.png", dpi = 300, bbox_inches = "tight")
-    plt.close()
+    # ax[0, 0].hist(lsoa_features["monthly_mean_rate_per_1000"], bins = 50)
+    # ax[0, 0].set_title("monthly_mean_rate_per_1000")
+    # ax[0, 1].hist(lsoa_features["log_monthly_mean_rate_per_1000"], bins = 50)
+    # ax[0, 1].set_title("log_monthly_mean_rate_per_1000")
+    # ax[1, 0].hist(lsoa_features["coefficient_of_variation"], bins = 50)
+    # ax[1, 0].set_title("coefficient_of_variation")
+    # ax[1, 1].hist(lsoa_features["summer_winter_ratio"], bins= 50)
+    # ax[1, 1].set_title("summer_winter_ratio")
+    # plt.tight_layout()
+    # plt.savefig("../visualizations/feature_distrs.png", dpi = 300, bbox_inches = "tight")
+    # plt.close()
 
     # check if there are pairs of features with high correlation
-    corr_cols = ["log_monthly_mean_rate_per_1000",
-        "coefficient_of_variation", "summer_winter_ratio", "violence_share", "asb_share",
-        "burglary_share", "shoplifting_share", "vehicle_crime_share", "other_theft_share",
-        "drugs_share", "theft_from_person_share", "possession_of_weapons_share"]
+    # corr_cols = ["log_monthly_mean_rate_per_1000",
+    #     "coefficient_of_variation", "summer_winter_ratio", "violence_share", "asb_share",
+    #     "burglary_share", "shoplifting_share", "vehicle_crime_share", "other_theft_share",
+    #     "drugs_share", "theft_from_person_share", "possession_of_weapons_share"]
 
-    corr = lsoa_features[corr_cols].corr()
+    # corr = lsoa_features[corr_cols].corr()
 
-    plt.figure(figsize = (12, 9))
-    sns.heatmap(corr, annot = True, fmt = ".2f", cmap = "coolwarm", center = 0)
-    plt.title("Feature correlation heatmap")
-    plt.tight_layout()
-    plt.savefig("../visualizations/correlation_heatmap.png", dpi = 300, bbox_inches = "tight")
-    plt.close()
+    # plt.figure(figsize = (12, 9))
+    # sns.heatmap(corr, annot = True, fmt = ".2f", cmap = "coolwarm", center = 0)
+    # plt.title("Feature correlation heatmap")
+    # plt.tight_layout()
+    # plt.savefig("../visualizations/correlation_heatmap.png", dpi = 300, bbox_inches = "tight")
+    # plt.close()
 
     # calculate data coverage for each lsoa: lsoas with a lot of missing data can distort clustering
     coverage = df.groupby("lsoa_code", as_index = False).agg(months_with_records = ("month", "nunique"))
