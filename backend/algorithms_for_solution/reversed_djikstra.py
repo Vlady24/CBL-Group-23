@@ -38,7 +38,6 @@ def find_nearest_officers(no_officers, officers, dest):
     )
 
     result = [officers[element[0]] for element in sorted_drivers][:no_officers]
-    routes = [officers[element[1]] for element in sorted_drivers][:no_officers]
 
     return result
 

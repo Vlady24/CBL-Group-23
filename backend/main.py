@@ -15,8 +15,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Initialize Socket.IO with ASGI mode and CORS
 sio = socketio.AsyncServer(async_mode='asgi', cors_allowed_origins='*')
-socket_app = socketio.ASGIApp(sio, app)
 
 # Data Models
 class OfficerAllocation(BaseModel):
@@ -62,18 +62,29 @@ async def generate_patrol_route(officer_id : int):
     # Trigger for phase 2: TSP routine patrol
     print(f"Running TSP for Officer {officer_id}")
 
-    # import and call TSP algorithm here
+    # define the starting police station (this cann be passed from the fronted later)
+    police_station = {
+        "lat": 52.4831,
+        "lng": -1.8966,
+        "name": "Birmingham Central HQ Depot"
+    }
+
     try:
-        patrol_routing.run_csv_patrol()
+        route_data = patrol_routing.run_db_patrol(
+            police_force="West Midlands Police",
+            police_station=police_station,
+            limit=15
+        )
 
         return {
             "status" : "success",
             "officer_id" : officer_id,
+            "route_data" : route_data,
             "message" : "Patrol route calculated. Check server console for route details."
         }
     
     except Exception as e:
-        # if the csv files are not found or the API fails
+        # if the db file is not found or the API fails
         # we prevent the server from crashing
         print(f"Error running TSP: {e}")
         return {
@@ -122,6 +133,4 @@ async def handle_emergency(sid, data):
 async def disconnect(sid):
     print(f"Client disconnected: {sid}")
 
-# mounting the socket app
-# this ensures FastAPI and Socket.IO run on the same port
-app.mount("/", socket_app)
+app = socketio.ASGIApp(sio, other_asgi_app=app)
