@@ -28,13 +28,13 @@ def find_nearest_officers(no_officers, officers, dest):
         officer_route = polyline.decode(route["overview_polyline"]["points"])
 
         routes[i] = {
-            "traffic_duration_s": leg["duration_in_traffic"]["value"],
+            "traffic_distance_m": leg["distance"]["value"],
             "route": officer_route
         }
 
     sorted_drivers = sorted(
         routes.items(),
-        key=lambda item: item[1]["traffic_duration_s"]
+        key=lambda item: item[1]["traffic_distance_m"]
     )
 
     result = [officers[element[0]] for element in sorted_drivers][:no_officers]
@@ -49,7 +49,7 @@ def test_find_nearest_officer():
     }
 
     dest  = (51.4416, 5.4697)
-    result, routes = find_nearest_officers(2, officers, dest)
+    result = find_nearest_officers(2, officers, dest)
 
     for element in result:
         print(f"Officer at location {element}")
