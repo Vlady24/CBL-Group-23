@@ -185,8 +185,7 @@ def run_kmeans(n_clusters=4):
 
     print ("K-Means calculation complete. Files saved")
 
-    # for now we just take the first 10 rows for testing purposes
-    map_data = cl[["lsoa_code", "lsoa_name", "latitude", "longitude", "cluster"]].to_dict(orient="records")[:10]
+    map_data = cl[["lsoa_code", "lsoa_name", "latitude", "longitude", "cluster"]].to_dict(orient="records")
 
     # return a summary dict and the map data to the API
     return {

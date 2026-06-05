@@ -1,4 +1,5 @@
 import googlemaps
+import polyline
 from datetime import datetime
 import glob
 import os
@@ -110,6 +111,36 @@ def calculate_active_deterrence_route(matrix_response, all_nodes):
     }
 
 
+def get_road_route(route_sequence):
+    print("Getting road route geometry from Google Maps")
+
+    road_route = []
+
+    for start, end in zip(route_sequence, route_sequence[1:]):
+        directions = gmaps.directions(
+            origin=(start["lat"], start["lng"]),
+            destination=(end["lat"], end["lng"]),
+            mode="driving",
+            departure_time=datetime.now(),
+            traffic_model="best_guess",
+        )
+
+        if not directions:
+            raise ValueError(
+                f"No road route found between {start['name']} and {end['name']}"
+            )
+
+        leg_points = polyline.decode(directions[0]["overview_polyline"]["points"])
+        leg_route = [{"lat": lat, "lng": lng} for lat, lng in leg_points]
+
+        if road_route and leg_route:
+            leg_route = leg_route[1:]
+
+        road_route.extend(leg_route)
+
+    return road_route
+
+
 # Reads the sqlite database, applies severity weights, 
 # and extracts the top high-crime LSOAs without duplicates
 def get_hotspots_from_db(db_path, police_force, limit=15):
@@ -198,6 +229,7 @@ def run_db_patrol(police_force, police_station, limit=15):
     matrix, nodes = get_live_matrix(police_station, target_lsoas)
 
     results = calculate_active_deterrence_route(matrix, nodes)
+    results["road_route"] = get_road_route(results["master_patrol_loop"])
 
     print(f"\nPolice force: {police_force}")
     print(f"Total Patrol Time: {results['total_route_time_minutes']} minutes")
