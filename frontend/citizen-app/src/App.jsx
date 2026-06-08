@@ -100,7 +100,9 @@ function App() {
     const backendPayload = {
       lat : Number(latitude),
       lng : Number(longitude),
-      officers_needed : 2 // hardcoded temporarily
+      officers_needed : 2, // hardcoded temporarily
+      details: details,
+      crime_type: crimeType
     }
 
     socket.emit('citizen_sos', backendPayload)

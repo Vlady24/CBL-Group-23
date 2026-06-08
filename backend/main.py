@@ -219,17 +219,22 @@ async def update_car_location(sid, data):
 
 @sio.on('citizen_sos')
 async def handle_emergency(sid, data):
+
+    print(f"raw incoming sos data: {data}")
     # Trigger for phase 3: Reversed Dijkstra
     print(f"Urgent: Citizen SOS received at {data['lat']}, {data['lng']}")
 
-    # import and call Reversed Dijkstra function here
+    citizen_details = data.get('details') or data.get('description') or "No specific details typed by citizen."
+    crime_type = data.get('crime_type') or "Citizen SOS Emergency"
 
     # notify the dispatcher dashboard
     await sio.emit('dispatch_alert',
                    {
                        "lat" : data['lat'],
                        "lng" : data['lng'],
-                       "message" : "Citizen emergency reported!"
+                       "message" : "Citizen emergency reported!",
+                       "details" : citizen_details,
+                       "crime_type" : crime_type
                    })
 
 @sio.on('disconnect')

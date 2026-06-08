@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
+import {io} from "socket.io-client";
+
+const socket = io("http://localhost:8000")
 
 type LayerKey = "clusters" | "patrolRoute" | "officers" | "incidents" | "emergencyRoute";
 
@@ -324,6 +327,55 @@ function App() {
       .catch(() => {
         setPoliceForces([]);
       });
+  }, []);
+
+  useEffect(() => {
+    // Listen for Live Citizen SOS Emergencies
+    socket.on("dispatch_alert", (data: any) => {
+      console.log("Real-time Citizen SOS alert received!", data);
+      
+      // Generate a new dynamic incident card for the dashboard
+      const dynamicIncident: Incident = {
+        id: `INC-${Math.floor(1000 + Math.random() * 9000)}`,
+        type: data.crime_type || "Citizen SOS Emergency",
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        priority: "High",
+        status: "pending",
+        position: { lat: data.lat, lng: data.lng },
+        address: "Live GPS Tracking Location",
+        source: "citizen_app_sos",
+        reporter: "Mobile User",
+        details: data.details,
+      };
+
+      // Push it to the top of the dispatcher's incoming reports list
+      setIncidents((prevIncidents) => [dynamicIncident, ...prevIncidents]);
+    });
+
+    // Listen for Live GPS Fleet Location Updates
+    socket.on("fleet_update", (serverFleet: Record<string, [number, number]>) => {
+      console.log("Received fleet GPS tracking matrix:", serverFleet);
+      
+      // Map the backend dictionary data format into the frontend state structures
+      setFleet((currentFleet) =>
+        currentFleet.map((car) => {
+          const backendKey = car.id.replace(" ", "_"); 
+          if (serverFleet[backendKey]) {
+            const [lat, lng] = serverFleet[backendKey];
+            return {
+              ...car,
+              position: { lat, lng },
+            };
+          }
+          return car;
+        })
+      );
+    });
+
+    return () => {
+      socket.off("dispatch_alert");
+      socket.off("fleet_update");
+    };
   }, []);
 
   function toggleLayer(layer: LayerKey) {
