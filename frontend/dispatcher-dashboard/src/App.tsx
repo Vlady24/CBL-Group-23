@@ -10,7 +10,7 @@ type FleetUnit = {
   status: "available" | "responding" | "patrolling" | "scene";
   position: { lat: number; lng: number };
 };
-
+ 
 type MapFocusTarget =
   | { type: "car"; id: string; position: { lat: number; lng: number } }
   | { type: "incident"; id: string; position: { lat: number; lng: number } };
@@ -870,6 +870,9 @@ function DispatcherMap({
   const [isReady, setIsReady] = useState(false);
   const [loadError, setLoadError] = useState("");
 
+  const [policeGeoJson, setPoliceGeoJson] = useState<PoliceFeatureCollection | null>(null);
+  const [lsoaGeoJson, setLsoaGeoJson] = useState<LsoaFeatureCollection | null>(null);
+
   const center = useMemo(() => incidents[0]?.position ?? { lat: 52.4862, lng: -1.8904 }, [incidents]);
 
   useEffect(() => {
@@ -902,57 +905,58 @@ function DispatcherMap({
   }, [center, compact, isReady]);
 
   useEffect(() => {
-    if (!isReady || !mapRef.current || !window.google) {
+    if (!isReady)
+      return;
+
+    Promise.all([
+      fetch("/data/police_force_areas.geojson").then((res) => res.json()),
+      fetch("/data/LSOA_boundaries.geojson").then((res) => res.json()),
+    ])
+      .then(([policeData, lsoaData]) => {
+        setPoliceGeoJson(policeData);
+        setLsoaGeoJson(lsoaData);
+      })
+      .catch(() => setLoadError("Failed to load map boundary data"));
+  }, [isReady]);
+
+  useEffect(() => {
+    if (!isReady || !mapRef.current || !window.google || !policeGeoJson) {
       return;
     }
 
-    let isCancelled = false;
+    if (dataLayerRef.current) {
+      dataLayerRef.current.setMap(null);
+    }
 
-    fetch("/data/police_force_areas.geojson")
-      .then((response) => response.json())
-      .then((geoJson: PoliceFeatureCollection) => {
-        if (isCancelled || !mapRef.current || !window.google) {
-          return;
-        }
+    const selectedFeature = policeGeoJson.features.find(
+      (feature) => feature.properties.PFA23NM === selectedForce,
+    );
 
-        if (dataLayerRef.current) {
-          dataLayerRef.current.setMap(null);
-        }
-
-        const selectedFeature = geoJson.features.find(
-          (feature) => feature.properties.PFA23NM === selectedForce,
-        );
-
-        const featureCollection: PoliceFeatureCollection = {
-          type: "FeatureCollection",
-          features: selectedFeature ? [selectedFeature] : [],
-        };
-
-        const dataLayer = new window.google.maps.Data({ map: mapRef.current });
-        dataLayer.addGeoJson(featureCollection);
-        dataLayer.setStyle({
-          fillColor: "#2563eb",
-          fillOpacity: 0,
-          strokeColor: "#2563eb",
-          strokeOpacity: 0.95,
-          strokeWeight: 3,
-        });
-
-        dataLayerRef.current = dataLayer;
-
-        if (selectedFeature) {
-          const bounds = getFeatureBounds(selectedFeature);
-          if (bounds) {
-            mapRef.current.fitBounds(bounds, compact ? 38 : 64);
-          }
-        }
-      })
-      .catch(() => setLoadError("Police force GeoJSON could not be loaded"));
-
-    return () => {
-      isCancelled = true;
+    const featureCollection: PoliceFeatureCollection = {
+      type: "FeatureCollection",
+      features: selectedFeature ? [selectedFeature] : [],
     };
-  }, [compact, isReady, selectedForce]);
+
+    const dataLayer = new window.google.maps.Data({ map: mapRef.current });
+    dataLayer.addGeoJson(featureCollection);
+    dataLayer.setStyle({
+      fillColor: "#2563eb",
+      fillOpacity: 0,
+      strokeColor: "#2563eb",
+      strokeOpacity: 0.95,
+      strokeWeight: 3,
+    });
+
+    dataLayerRef.current = dataLayer;
+
+    if (selectedFeature) {
+      const bounds = getFeatureBounds(selectedFeature);
+      if (bounds) {
+        mapRef.current.fitBounds(bounds, compact ? 38 : 64);
+      }
+    }
+  }, [compact, isReady, selectedForce, policeGeoJson]);
+
 
   useEffect(() => {
     if (!isReady || !mapRef.current || !window.google || !focusTarget) {
@@ -964,7 +968,7 @@ function DispatcherMap({
   }, [focusTarget, isReady]);
 
   useEffect(() => {
-    if (!isReady || !mapRef.current || !window.google) {
+    if (!isReady || !mapRef.current || !window.google || !policeGeoJson || !lsoaGeoJson) {
       return;
     }
 
@@ -978,77 +982,63 @@ function DispatcherMap({
     }
 
     const zoneByLsoa = new Map(kMeansZones.map((zone) => [zone.lsoa_code, zone]));
-    let isCancelled = false;
 
-    Promise.all([
-      fetch("/data/LSOA_boundaries.geojson").then((response) => response.json()),
-      fetch("/data/police_force_areas.geojson").then((response) => response.json()),
-    ])
-      .then(([lsoaGeoJson, policeGeoJson]: [LsoaFeatureCollection, PoliceFeatureCollection]) => {
-        if (isCancelled || !mapRef.current || !window.google) {
-          return;
-        }
+    const selectedPoliceFeature = policeGeoJson.features.find(
+      (feature) => feature.properties.PFA23NM === selectedForce,
+    );
 
-        const selectedPoliceFeature = policeGeoJson.features.find(
-          (feature) => feature.properties.PFA23NM === selectedForce,
-        );
+    const clusteredFeatures = lsoaGeoJson.features.filter((feature) => {
+      const zone = zoneByLsoa.get(feature.properties.LSOA21CD);
 
-        const clusteredFeatures = lsoaGeoJson.features.filter((feature) => {
-          const zone = zoneByLsoa.get(feature.properties.LSOA21CD);
+      if (!zone || !selectedPoliceFeature || !visibleClusters.includes(zone.cluster)) {
+        return false;
+      }
 
-          if (!zone || !selectedPoliceFeature || !visibleClusters.includes(zone.cluster)) {
-            return false;
-          }
+      return pointInFeature(
+        Number(feature.properties.LAT),
+        Number(feature.properties.LONG),
+        selectedPoliceFeature,
+      );
+    });
 
-          return pointInFeature(
-            Number(feature.properties.LAT),
-            Number(feature.properties.LONG),
-            selectedPoliceFeature,
-          );
-        });
+    const dataLayer = new window.google.maps.Data({ map: mapRef.current });
+    dataLayer.addGeoJson({
+      type: "FeatureCollection",
+      features: clusteredFeatures,
+    });
+    
+    dataLayer.setStyle((feature: any) => {
+      const lsoaCode = feature.getProperty("LSOA21CD");
+      const zone = zoneByLsoa.get(lsoaCode);
+      const cluster = zone?.cluster ?? 0;
 
-        const dataLayer = new window.google.maps.Data({ map: mapRef.current });
-        dataLayer.addGeoJson({
-          type: "FeatureCollection",
-          features: clusteredFeatures,
-        });
-        dataLayer.setStyle((feature: any) => {
-          const lsoaCode = feature.getProperty("LSOA21CD");
-          const zone = zoneByLsoa.get(lsoaCode);
-          const cluster = zone?.cluster ?? 0;
+      return {
+        fillColor: clusterColor(cluster),
+        fillOpacity: 0.3,
+        strokeColor: clusterColor(cluster),
+        strokeOpacity: 0.85,
+        strokeWeight: 1,
+      };
+    });
 
-          return {
-            fillColor: clusterColor(cluster),
-            fillOpacity: 0.3,
-            strokeColor: clusterColor(cluster),
-            strokeOpacity: 0.85,
-            strokeWeight: 1,
-          };
-        });
+    const infoWindow = new window.google.maps.InfoWindow();
+    dataLayer.addListener("click", (event: any) => {
+      const lsoaCode = event.feature.getProperty("LSOA21CD");
+      const boundaryName = event.feature.getProperty("LSOA21NM");
+      const zone = zoneByLsoa.get(lsoaCode);
 
-        const infoWindow = new window.google.maps.InfoWindow();
-        dataLayer.addListener("click", (event: any) => {
-          const lsoaCode = event.feature.getProperty("LSOA21CD");
-          const boundaryName = event.feature.getProperty("LSOA21NM");
-          const zone = zoneByLsoa.get(lsoaCode);
+      if (!zone) {
+        return;
+      }
 
-          if (!zone) {
-            return;
-          }
+      infoWindow.setContent(lsoaInfoHtml(zone, boundaryName));
+      infoWindow.setPosition(event.latLng);
+      infoWindow.open(mapRef.current);
+    });
 
-          infoWindow.setContent(lsoaInfoHtml(zone, boundaryName));
-          infoWindow.setPosition(event.latLng);
-          infoWindow.open(mapRef.current);
-        });
-
-        clusterLayerRef.current = dataLayer;
-      })
-      .catch(() => setLoadError("LSOA boundaries could not be loaded"));
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [isReady, kMeansZones, layers.clusters, selectedForce, visibleClusters]);
+    clusterLayerRef.current = dataLayer;
+    
+  }, [isReady, kMeansZones, layers.clusters, selectedForce, visibleClusters, policeGeoJson, lsoaGeoJson]);
 
   useEffect(() => {
     if (!isReady || !mapRef.current || !window.google) {
