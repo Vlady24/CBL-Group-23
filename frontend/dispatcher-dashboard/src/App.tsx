@@ -297,6 +297,7 @@ function App() {
   const [dispatchError, setDispatchError] = useState("");
   const [isDispatching, setIsDispatching] = useState(false);
   const [mapFocusTarget, setMapFocusTarget] = useState<MapFocusTarget | null>(null);
+  const [incomingAlert, setIncomingAlert] = useState<Incident | null>(null);
 
   const activeIncident = selectedIncident || incidents[0];
   const filteredPoliceForces = policeForces.filter((force) =>
@@ -350,6 +351,9 @@ function App() {
 
       // Push it to the top of the dispatcher's incoming reports list
       setIncidents((prevIncidents) => [dynamicIncident, ...prevIncidents]);
+
+      // Trigger the flashing pop-up
+      setIncomingAlert(dynamicIncident);
     });
 
     // Listen for Live GPS Fleet Location Updates
@@ -580,307 +584,339 @@ function App() {
   }
 
   return (
-    <main
-      className="dashboard"
-      style={{ gridTemplateColumns: `minmax(420px, 1fr) 10px ${sidebarWidth}px` }}
-    >
-      <section className="map-workspace">
-        <header className="topbar">
-          <div className="topbar-title">
-            <h1>Dispatcher Dashboard</h1>
+    <>
+      {/* flashing alert */}
+      {incomingAlert && (
+        <div className="urgent-alert-overlay">
+          <div className="urgent-alert-box">
+            <h2>Urgent: SOS Received</h2>
+            <p><strong>Type:</strong> {incomingAlert.type}</p>
+            <p><strong>Details:</strong> {incomingAlert.details}</p>
+            
+            <div className="urgent-alert-actions">
+              <button 
+                className="secondary-action" 
+                onClick={() => setIncomingAlert(null)}
+              >
+                Dismiss
+              </button>
+              <button 
+                className="danger-action" 
+                onClick={() => {
+                  setIncomingAlert(null); // Close the flash
+                  openDispatch(incomingAlert); // Open the dispatch menu
+                }}
+              >
+                Dispatch Cars
+              </button>
+            </div>
           </div>
+        </div>
+      )}
 
-          <div className="force-picker">
-            <input
-              id="force-search"
-              list="police-force-options"
-              value={forceSearch}
-              onChange={(event) => {
-                const nextValue = event.target.value;
-                setForceSearch(nextValue);
+      {/* main dashboard grid*/}
+      <main
+        className="dashboard"
+        style={{ gridTemplateColumns: `minmax(420px, 1fr) 10px ${sidebarWidth}px` }}
+      >
+        <section className="map-workspace">
+          <header className="topbar">
+            <div className="topbar-title">
+              <h1>Dispatcher Dashboard</h1>
+            </div>
 
-                if (policeForces.includes(nextValue)) {
-                  setSelectedForce(nextValue);
-                }
-              }}
-              placeholder="Search police force"
-              disabled={policeForces.length === 0}
+            <div className="force-picker">
+              <input
+                id="force-search"
+                list="police-force-options"
+                value={forceSearch}
+                onChange={(event) => {
+                  const nextValue = event.target.value;
+                  setForceSearch(nextValue);
+
+                  if (policeForces.includes(nextValue)) {
+                    setSelectedForce(nextValue);
+                  }
+                }}
+                placeholder="Search police force"
+                disabled={policeForces.length === 0}
+              />
+              <datalist id="police-force-options">
+                {filteredPoliceForces.map((force) => (
+                  <option key={force} value={force}>
+                    {force}
+                  </option>
+                ))}
+              </datalist>
+            </div>
+
+            <div className="dispatcher-user">
+              <span>DS</span>
+              <div>
+                <strong>Dispatcher Smith</strong>
+                <small>Control Room</small>
+              </div>
+            </div>
+          </header>
+
+          <section className="map-shell" aria-label="Dispatcher Google Map">
+            <DispatcherMap
+              apiKey={googleMapsApiKey}
+              selectedForce={selectedForce}
+              layers={layers}
+              fleet={fleet}
+              incidents={incidents}
+              kMeansZones={kMeansZones}
+              visibleClusters={visibleClusters}
+              deploymentRoutes={deploymentRoutes}
+              patrolRoute={patrolRoute}
+              patrolRoadRoute={patrolRoadRoute}
+              isPatrolRouteGenerated={isPatrolRouteGenerated}
+              focusTarget={mapFocusTarget}
             />
-            <datalist id="police-force-options">
-              {filteredPoliceForces.map((force) => (
-                <option key={force} value={force}>
-                  {force}
-                </option>
-              ))}
-            </datalist>
-          </div>
 
-          <div className="dispatcher-user">
-            <span>DS</span>
-            <div>
-              <strong>Dispatcher Smith</strong>
-              <small>Control Room</small>
+            <div className="map-card map-card-top">
+              <strong>Selected force boundary</strong>
             </div>
-          </div>
-        </header>
 
-        <section className="map-shell" aria-label="Dispatcher Google Map">
-          <DispatcherMap
-            apiKey={googleMapsApiKey}
-            selectedForce={selectedForce}
-            layers={layers}
-            fleet={fleet}
-            incidents={incidents}
-            kMeansZones={kMeansZones}
-            visibleClusters={visibleClusters}
-            deploymentRoutes={deploymentRoutes}
-            patrolRoute={patrolRoute}
-            patrolRoadRoute={patrolRoadRoute}
-            isPatrolRouteGenerated={isPatrolRouteGenerated}
-            focusTarget={mapFocusTarget}
-          />
-
-          <div className="map-card map-card-top">
-            <strong>Selected force boundary</strong>
-          </div>
-
-          {layers.clusters && kMeansZones.length > 0 && (
-            <div className="cluster-legend">
-              <strong>Daily zones</strong>
-              {Object.entries(clusterNames).map(([cluster, name]) => (
-                <label className="legend-row" key={cluster}>
-                  <input
-                    type="checkbox"
-                    checked={visibleClusters.includes(Number(cluster))}
-                    onChange={() => toggleCluster(Number(cluster))}
-                  />
-                  <span
-                    className="legend-swatch"
-                    style={{ background: clusterColor(Number(cluster)) }}
-                  ></span>
-                  <span>{name}</span>
-                </label>
-              ))}
-            </div>
-          )}
-        </section>
-      </section>
-
-      <div
-        className="splitter splitter-horizontal"
-        role="separator"
-        aria-orientation="vertical"
-        onMouseDown={startHorizontalResize}
-      ></div>
-
-      <aside className="sidebar">
-        <section className="panel reports-panel" style={{ height: reportsHeight }}>
-          <div className="panel-heading">
-            <span>Incoming Reports</span>
-          </div>
-          <div className="incoming-reports">
-            {incidents.map((incident) => (
-              <article className="report-card" key={incident.id}>
-                <header className="report-header">
-                  <strong>{incident.id}</strong>
-                  <span className={incident.status}>{incident.status}</span>
-                </header>
-                <div className="report-summary">
-                  <p><b>{incident.type}</b></p>
-                  <p>{incident.time} · {incident.priority} priority</p>
-                  <p>{incident.address}</p>
-                </div>
-                <div className="report-actions">
-                  <button
-                    className="secondary-action small-action"
-                    onClick={() => {
-                      setSelectedIncident(incident);
-                      setShowDetails(true);
-                    }}
-                  >
-                    View details
-                  </button>
-                  <button
-                    className="primary-action small-action"
-                    onClick={() => openDispatch(incident)}
-                  >
-                    Dispatch
-                  </button>
-                </div>
-              </article>
-            ))}
-          </div>
+            {layers.clusters && kMeansZones.length > 0 && (
+              <div className="cluster-legend">
+                <strong>Daily zones</strong>
+                {Object.entries(clusterNames).map(([cluster, name]) => (
+                  <label className="legend-row" key={cluster}>
+                    <input
+                      type="checkbox"
+                      checked={visibleClusters.includes(Number(cluster))}
+                      onChange={() => toggleCluster(Number(cluster))}
+                    />
+                    <span
+                      className="legend-swatch"
+                      style={{ background: clusterColor(Number(cluster)) }}
+                    ></span>
+                    <span>{name}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+          </section>
         </section>
 
         <div
-          className="splitter splitter-vertical"
+          className="splitter splitter-horizontal"
           role="separator"
-          aria-orientation="horizontal"
-          onMouseDown={startVerticalResize}
+          aria-orientation="vertical"
+          onMouseDown={startHorizontalResize}
         ></div>
 
-        <section className="panel compact-panel">
-          <div className="panel-heading">
-            <span>Daily Patrol Route</span>
-          </div>
-          <div className="control-grid">
-            <button className="secondary-action small-action" onClick={showPatrolRoutes} disabled={isPatrolRouteLoading}>
-              {isPatrolRouteLoading ? "Generating..." : "Generate Patrol Route"}
-            </button>
-          </div>
-          <div className="route-summary">
-            <p>
-              <b>Estimated loop:</b>{" "}
-              {patrolRouteMinutes ? `${Math.round(patrolRouteMinutes)} min` : "Not generated"}
-            </p>
-            <p>
-              <b>Route status:</b>{" "}
-              {isPatrolRouteLoading ? "Checking live traffic" : isPatrolRouteGenerated ? "Ready for review" : "Waiting for dispatcher"}
-            </p>
-            {patrolRoute.length > 0 && (
-              <p>
-                <b>Stops:</b> {Math.max(patrolRoute.length - 2, 0)} hotspots
-              </p>
-            )}
-            {patrolRouteError && <p className="dispatch-error">{patrolRouteError}</p>}
-          </div>
-        </section>
-
-        <section className="panel compact-panel">
-          <div className="panel-heading">
-            <span>Map Layers</span>
-          </div>
-          <div className="filters">
-            {Object.entries(layers).map(([key, enabled]) => (
-              <label key={key} className="check-row">
-                <input
-                  type="checkbox"
-                  checked={enabled}
-                  onChange={() => toggleLayer(key as LayerKey)}
-                />
-                <span>{layerLabel(key as LayerKey)}</span>
-              </label>
-            ))}
-          </div>
-        </section>
-
-        <section className="panel feed-panel">
-          <div className="panel-heading">
-            <span>Fleet Status</span>
-            <small>{fleet.length} active units</small>
-          </div>
-          <div className="fleet-feed">
-            {fleet.map((car) => (
-              <button
-                className="fleet-card"
-                key={car.id}
-                onClick={() => setMapFocusTarget({ type: "car", id: car.id, position: car.position })}
-              >
-                <div>
-                  <strong>{car.id}</strong>
-                  <p>{car.area}</p>
-                </div>
-                <span className={`fleet-pill ${car.status}`}>{car.state}</span>
-              </button>
-            ))}
-          </div>
-        </section>
-      </aside>
-
-      {showEmergency && (
-        <section className="modal-backdrop" role="dialog" aria-modal="true">
-          <div className="emergency-modal">
-            <div className="modal-map">
-              <DispatcherMap
-                apiKey={googleMapsApiKey}
-                selectedForce={selectedForce}
-                layers={{
-                  clusters: false,
-                  patrolRoute: false,
-                  officers: true,
-                  incidents: true,
-                  emergencyRoute: true,
-                }}
-                fleet={fleet}
-                incidents={[activeIncident]}
-                kMeansZones={[]}
-                visibleClusters={visibleClusters}
-                deploymentRoutes={deploymentRoutes}
-                patrolRoute={patrolRoute}
-                patrolRoadRoute={patrolRoadRoute}
-                isPatrolRouteGenerated={isPatrolRouteGenerated}
-                focusTarget={mapFocusTarget}
-                compact
-              />
+        <aside className="sidebar">
+          <section className="panel reports-panel" style={{ height: reportsHeight }}>
+            <div className="panel-heading">
+              <span>Incoming Reports</span>
             </div>
-            <div className="modal-content">
-              <p className="alert-label">Incoming SOS</p>
-              <h2>Dispatch officers</h2>
-              <p className="modal-copy">
-                Choose how many cars to send to {activeIncident.id}.
+            <div className="incoming-reports">
+              {incidents.map((incident) => (
+                <article className="report-card" key={incident.id}>
+                  <header className="report-header">
+                    <strong>{incident.id}</strong>
+                    <span className={incident.status}>{incident.status}</span>
+                  </header>
+                  <div className="report-summary">
+                    <p><b>{incident.type}</b></p>
+                    <p>{incident.time} · {incident.priority} priority</p>
+                    <p>{incident.address}</p>
+                  </div>
+                  <div className="report-actions">
+                    <button
+                      className="secondary-action small-action"
+                      onClick={() => {
+                        setSelectedIncident(incident);
+                        setShowDetails(true);
+                      }}
+                    >
+                      View details
+                    </button>
+                    <button
+                      className="primary-action small-action"
+                      onClick={() => openDispatch(incident)}
+                    >
+                      Dispatch
+                    </button>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </section>
+
+          <div
+            className="splitter splitter-vertical"
+            role="separator"
+            aria-orientation="horizontal"
+            onMouseDown={startVerticalResize}
+          ></div>
+
+          <section className="panel compact-panel">
+            <div className="panel-heading">
+              <span>Daily Patrol Route</span>
+            </div>
+            <div className="control-grid">
+              <button className="secondary-action small-action" onClick={showPatrolRoutes} disabled={isPatrolRouteLoading}>
+                {isPatrolRouteLoading ? "Generating..." : "Generate Patrol Route"}
+              </button>
+            </div>
+            <div className="route-summary">
+              <p>
+                <b>Estimated loop:</b>{" "}
+                {patrolRouteMinutes ? `${Math.round(patrolRouteMinutes)} min` : "Not generated"}
               </p>
+              <p>
+                <b>Route status:</b>{" "}
+                {isPatrolRouteLoading ? "Checking live traffic" : isPatrolRouteGenerated ? "Ready for review" : "Waiting for dispatcher"}
+              </p>
+              {patrolRoute.length > 0 && (
+                <p>
+                  <b>Stops:</b> {Math.max(patrolRoute.length - 2, 0)} hotspots
+                </p>
+              )}
+              {patrolRouteError && <p className="dispatch-error">{patrolRouteError}</p>}
+            </div>
+          </section>
 
-              <label className="field-label" htmlFor="officers-required">
-                Number of cars required
-              </label>
-              <input
-                id="officers-required"
-                min={1}
-                max={fleet.length}
-                type="number"
-                value={officersRequired}
-                onChange={(event) => setOfficersRequired(Number(event.target.value))}
-              />
-              {dispatchError && <p className="modal-error">{dispatchError}</p>}
+          <section className="panel compact-panel">
+            <div className="panel-heading">
+              <span>Map Layers</span>
+            </div>
+            <div className="filters">
+              {Object.entries(layers).map(([key, enabled]) => (
+                <label key={key} className="check-row">
+                  <input
+                    type="checkbox"
+                    checked={enabled}
+                    onChange={() => toggleLayer(key as LayerKey)}
+                  />
+                  <span>{layerLabel(key as LayerKey)}</span>
+                </label>
+              ))}
+            </div>
+          </section>
 
-              <div className="modal-actions">
-                <button className="secondary-action" onClick={() => setShowEmergency(false)}>
-                  Review later
+          <section className="panel feed-panel">
+            <div className="panel-heading">
+              <span>Fleet Status</span>
+              <small>{fleet.length} active units</small>
+            </div>
+            <div className="fleet-feed">
+              {fleet.map((car) => (
+                <button
+                  className="fleet-card"
+                  key={car.id}
+                  onClick={() => setMapFocusTarget({ type: "car", id: car.id, position: car.position })}
+                >
+                  <div>
+                    <strong>{car.id}</strong>
+                    <p>{car.area}</p>
+                  </div>
+                  <span className={`fleet-pill ${car.status}`}>{car.state}</span>
                 </button>
-                <button className="danger-action" disabled={isDispatching} onClick={dispatchOfficers}>
-                  {isDispatching ? "Dispatching..." : "Send cars"}
+              ))}
+            </div>
+          </section>
+        </aside>
+
+        {showEmergency && activeIncident && (
+          <section className="modal-backdrop" role="dialog" aria-modal="true">
+            <div className="emergency-modal">
+              <div className="modal-map">
+                <DispatcherMap
+                  apiKey={googleMapsApiKey}
+                  selectedForce={selectedForce}
+                  layers={{
+                    clusters: false,
+                    patrolRoute: false,
+                    officers: true,
+                    incidents: true,
+                    emergencyRoute: true,
+                  }}
+                  fleet={fleet}
+                  incidents={[activeIncident]}
+                  kMeansZones={[]}
+                  visibleClusters={visibleClusters}
+                  deploymentRoutes={deploymentRoutes}
+                  patrolRoute={patrolRoute}
+                  patrolRoadRoute={patrolRoadRoute}
+                  isPatrolRouteGenerated={isPatrolRouteGenerated}
+                  focusTarget={mapFocusTarget}
+                  compact
+                />
+              </div>
+              <div className="modal-content">
+                <p className="alert-label">Incoming SOS</p>
+                <h2>Dispatch officers</h2>
+                <p className="modal-copy">
+                  Choose how many cars to send to {activeIncident.id}.
+                </p>
+
+                <label className="field-label" htmlFor="officers-required">
+                  Number of cars required
+                </label>
+                <input
+                  id="officers-required"
+                  min={1}
+                  max={fleet.length}
+                  type="number"
+                  value={officersRequired}
+                  onChange={(event) => setOfficersRequired(Number(event.target.value))}
+                />
+                {dispatchError && <p className="modal-error">{dispatchError}</p>}
+
+                <div className="modal-actions">
+                  <button className="secondary-action" onClick={() => setShowEmergency(false)}>
+                    Review later
+                  </button>
+                  <button className="danger-action" disabled={isDispatching} onClick={dispatchOfficers}>
+                    {isDispatching ? "Dispatching..." : "Send cars"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </section>
+        )}
+
+        {showDetails && selectedIncident && (
+          <section className="modal-backdrop" role="dialog" aria-modal="true">
+            <div className="details-modal">
+              <header className="report-header">
+                <strong>{selectedIncident.id}</strong>
+                <span className={selectedIncident.status}>{selectedIncident.status}</span>
+              </header>
+              <div className="report-fields">
+                <p><b>Crime type:</b> {selectedIncident.type.toLowerCase()}</p>
+                <p><b>Latitude:</b> {selectedIncident.position.lat.toFixed(6)}</p>
+                <p><b>Longitude:</b> {selectedIncident.position.lng.toFixed(6)}</p>
+                <p><b>Address:</b> {selectedIncident.address}</p>
+                <p><b>Time:</b> {selectedIncident.time}</p>
+                <p><b>Location source:</b> {selectedIncident.source}</p>
+                <p><b>Reporter:</b> {selectedIncident.reporter}</p>
+                <p><b>Details:</b> {selectedIncident.details}</p>
+              </div>
+              <div className="modal-actions">
+                <button className="secondary-action" onClick={() => setShowDetails(false)}>
+                  Close
+                </button>
+                <button
+                  className="danger-action"
+                  onClick={() => {
+                    setShowDetails(false);
+                    openDispatch(selectedIncident);
+                  }}
+                >
+                  Dispatch
                 </button>
               </div>
             </div>
-          </div>
-        </section>
-      )}
-
-      {showDetails && selectedIncident && (
-        <section className="modal-backdrop" role="dialog" aria-modal="true">
-          <div className="details-modal">
-            <header className="report-header">
-              <strong>{selectedIncident.id}</strong>
-              <span className={selectedIncident.status}>{selectedIncident.status}</span>
-            </header>
-            <div className="report-fields">
-              <p><b>Crime type:</b> {selectedIncident.type.toLowerCase()}</p>
-              <p><b>Latitude:</b> {selectedIncident.position.lat.toFixed(6)}</p>
-              <p><b>Longitude:</b> {selectedIncident.position.lng.toFixed(6)}</p>
-              <p><b>Address:</b> {selectedIncident.address}</p>
-              <p><b>Time:</b> {selectedIncident.time}</p>
-              <p><b>Location source:</b> {selectedIncident.source}</p>
-              <p><b>Reporter:</b> {selectedIncident.reporter}</p>
-              <p><b>Details:</b> {selectedIncident.details}</p>
-            </div>
-            <div className="modal-actions">
-              <button className="secondary-action" onClick={() => setShowDetails(false)}>
-                Close
-              </button>
-              <button
-                className="danger-action"
-                onClick={() => {
-                  setShowDetails(false);
-                  openDispatch(selectedIncident);
-                }}
-              >
-                Dispatch
-              </button>
-            </div>
-          </div>
-        </section>
-      )}
-    </main>
+          </section>
+        )}
+      </main>
+    </>
   );
 }
 
