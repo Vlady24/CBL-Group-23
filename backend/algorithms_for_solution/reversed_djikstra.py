@@ -57,8 +57,17 @@ def find_nearest_officers(no_officers, officers, dest):
         key=lambda item: item[1]["traffic_duration_s"]
     )
 
-    result = [element[1] for element in sorted_drivers[:no_officers]]
-
+    # result = [element[1] for element in sorted_drivers[:no_officers]]  old version 
+    result = [
+    {
+        "officer_id": element[0],
+        "officer_location": officers[element[0]],
+        "traffic_duration_s": element[1]["traffic_duration_s"],
+        "distance_m": element[1]["distance_m"] if "distance_m" in element[1] else None,         # new version needed for ratio sim
+        "route": element[1]["route"],
+    }
+    for element in sorted_drivers[:no_officers]
+    ] 
     return result
 
 def test_find_nearest_officer():

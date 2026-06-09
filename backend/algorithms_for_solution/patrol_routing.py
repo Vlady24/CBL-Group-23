@@ -6,6 +6,8 @@ import os
 from dotenv import load_dotenv
 import pandas as pd
 import sqlite3
+from pathlib import Path
+
 
 # The distance matrix API is used according to the following information:
 #
@@ -18,9 +20,26 @@ import sqlite3
 
 # finding the exact path of the folder where the .env is located
 # go up one level to the parent directory, then into important_stuff_APIs
-parent_dir = os.path.dirname(os.path.dirname(__file__))
-env_path = os.path.join(parent_dir, '../important_stuff_APIs', '.env')
+
+
+_HERE    = Path(os.path.abspath(__file__))                          # this is for solving path issues for me (Luuk)
+_ROOT    = _HERE.parent.parent.parent   
+env_path = _ROOT / "important_stuff_APIs" / ".env"
 load_dotenv(dotenv_path=env_path)
+
+def _resolve_db_path(base_dir):
+    for name in ("crime_data.sqlite", "crime_data.db"):
+        candidate = base_dir / "database" / name
+        if candidate.exists():
+            return candidate
+    raise FileNotFoundError(
+        "No database found. Expected crime_data.sqlite or crime_data.db "
+        f"in {base_dir / 'database'}"
+    )
+
+# parent_dir = os.path.dirname(os.path.dirname(__file__))                       old version of the above part
+# env_path = os.path.join(parent_dir, '../important_stuff_APIs', '.env')
+# load_dotenv(dotenv_path=env_path)
 
 api_key = os.getenv("GOOGLE_MAPS_API_KEY")
 gmaps = googlemaps.Client(key=api_key)
@@ -205,8 +224,10 @@ def get_hotspots_from_db(db_path, police_force, limit=15):
 
 # testing using crime data from the SQLite database
 def run_db_patrol(police_force, police_station, limit=15):
-    backend_dir = os.path.dirname(os.path.dirname(__file__))
-    db_path = os.path.join(backend_dir, "database", "crime_data.db")
+    # backend_dir = os.path.dirname(os.path.dirname(__file__))                      old version of this part
+    # db_path = os.path.join(backend_dir, "database", "crime_data.db")
+
+    db_path = str(_resolve_db_path(_HERE.parent.parent))
 
     hotspots_df = get_hotspots_from_db(
         db_path=db_path,

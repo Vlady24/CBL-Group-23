@@ -1,3 +1,4 @@
+from pathlib import Path
 import sqlite3
 import numpy as np
 import pandas as pd
@@ -7,6 +8,21 @@ import seaborn as sns
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
 
+# resolve paths relative to this file, so it works regardless of where it's called from
+_BASE_DIR = Path(__file__).resolve().parent          
+def _resolve_db_path(base_dir):
+    for name in ("crime_data.sqlite", "crime_data.db"):
+        candidate = base_dir / "database" / name
+        if candidate.exists():
+            return candidate
+    raise FileNotFoundError(
+        "No database found. Expected crime_data.sqlite or crime_data.db "
+        f"in {base_dir / 'database'}"
+    )
+
+_DB_PATH = _resolve_db_path(_BASE_DIR.parent)
+_OUT_DIR  = _BASE_DIR / "algorithms_for_solution"    
+
 # Executes the k-means clustering algorithm on crime data
 # It is wrapped in a function so it can be called by the FastAPI server
 def run_kmeans(n_clusters=4):
@@ -14,7 +30,7 @@ def run_kmeans(n_clusters=4):
 
     try:
         
-        conn = sqlite3.connect("database/crime_data.db")
+        conn = sqlite3.connect(str(_DB_PATH))
 
         df = pd.read_sql_query("""select c.lsoa_code, c.lsoa_name, c.month, c.crime_type, c.latitude, c.longitude, p.population
                             from crimes c
@@ -181,7 +197,7 @@ def run_kmeans(n_clusters=4):
 
     # Save outputs
     #lsoa_features.to_csv("algorithms_for_solution/lsoa_features.csv", index=False)
-    #cl.to_csv("algorithms_for_solution/lsoa_features_with_clusters.csv", index=False)
+    #cl.to_csv(str(_BASE_DIR.parent / "database" / "lsoa_features_with_clusters.csv"), index=False)  # needed for ratio output, and save in database folder, so uncomment for that purpose
 
     print ("K-Means calculation complete. Files saved")
 
