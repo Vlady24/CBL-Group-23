@@ -39,3 +39,5 @@ eda_graphs/
 
 # --- EXCEPTIONS (Force Git to track these files) ---
 !historical_capacity_merged.csv
+
+node_modules

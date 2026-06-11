@@ -506,6 +506,16 @@ function App() {
         throw new Error(result.message || "Deployment request failed");
       }
 
+      socket.emit("officers_dispatched", {
+        incident_id: activeIncident.id,
+        incident_type: activeIncident.type,
+        officers_sent: officersRequired,
+        timestamp: new Date().toISOString(),
+        assigned_officers: result.data.assigned_officers.map(
+          (officer) => officer.car_id
+        ),
+      });
+
       const assignedIds = new Set(result.data.assigned_officers.map((officer) => officer.car_id));
 
       setFleet((currentFleet) =>
