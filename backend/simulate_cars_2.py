@@ -1,39 +1,3 @@
-"""
-simulate_cars.py  —  Active Deterrence Patrol Simulator
-========================================================
-Runs as a standalone process alongside main.py.
-Connects to the FastAPI/Socket.IO server as a client and drives
-a realistic fleet simulation with four officer states:
-
-    patrolling      – officer follows their TSP road_route polyline (real roads, Google Maps)
-    cluster_fixed   – officer orbits their assigned K-means cluster centroid
-    responding      – officer follows the Reversed Dijkstra road route to an incident
-    at_station      – officer is stationary at the police station (cooldown / standby)
-
-Start-up sequence
------------------
-1. Calls kmeans.run_kmeans(n_clusters) — uses the real algorithm against the SQLite DB.
-   Returns map_data with {lsoa_code, lsoa_name, latitude, longitude, cluster} per LSOA.
-   Derives cluster centroids and groups LSOAs per cluster from this output.
-
-2. Each officer is assigned a cluster. A configurable fraction become cluster_fixed.
-   Patrolling officers each call patrol_routing.run_db_patrol() to get a real
-   Google Maps TSP route. They follow the road_route polyline step by step.
-
-3. On receiving a dispatch_alert, the sim calls reversed_djikstra.find_nearest_officers()
-   using current officer positions. The chosen officer follows the returned road polyline
-   to the incident, then transitions to at_station for a cooldown.
-
-Socket.IO events emitted to server
------------------------------------
-    update_location      – {car_id, lat, lng}              (existing, consumed by main.py)
-    officer_state_update – {car_id, state, lat, lng, ...}  (new, for dashboard)
-
-Socket.IO events consumed from server
----------------------------------------
-    dispatch_alert       – {lat, lng, crime_type, details}
-"""
-
 import asyncio
 import random
 import math
