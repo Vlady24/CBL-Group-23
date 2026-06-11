@@ -12,11 +12,6 @@ CITY_CONFIGS = {
         "spread": 0.03
     },
 
-    "manchester": {
-        "center": (53.4808, -2.2426),
-        "spread": 0.03
-    },
-
     "london": {
         "center": (51.5072, -0.1276),
         "spread": 0.05
@@ -36,7 +31,7 @@ CITY_CONFIGS = {
 # Choosing city for simulation
 selected_city = input(
     "Choose city "
-    "(birmingham/manchester/london/liverpool/leeds): "
+    "(birmingham/london/liverpool/leeds): "
 ).lower()
 
 if selected_city not in CITY_CONFIGS:
