@@ -1163,3 +1163,52 @@ button:focus-visible {
     font-size: 24px;
   }
 }
+.urgent-alert-overlay {
+  position: fixed;
+  top: 5vh; 
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 99999; 
+  width: 350px; 
+  pointer-events: auto; 
+}
+
+.urgent-alert-box {
+  background-color: #0f172a; 
+  color: white; 
+  padding: 15px 20px;
+  border-radius: 8px;
+  text-align: center;
+  border: 2px solid #ef4444; 
+  box-shadow: 0 4px 10px rgba(239, 68, 68, 0.2); 
+  animation: flashPulse 1.2s infinite alternate; 
+}
+
+.urgent-alert-box h2 {
+  color: #ef4444; 
+  margin: 0 0 8px 0;
+  font-size: 18px; 
+}
+
+.urgent-alert-box p {
+  margin: 4px 0;
+  font-size: 14px; 
+}
+
+.urgent-alert-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 15px;
+  justify-content: center;
+}
+
+
+@keyframes flashPulse {
+  0% {
+    box-shadow: 0 4px 10px rgba(239, 68, 68, 0.2);
+  }
+  100% {
+    box-shadow: 0 4px 30px rgba(239, 68, 68, 0.8);
+    background-color: #1a0f0f; 
+  }
+}

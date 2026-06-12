@@ -920,49 +920,80 @@ function App() {
   }
 
   return (
-    <main
-      className="dashboard"
-      style={{ gridTemplateColumns: `minmax(420px, 1fr) 10px ${sidebarWidth}px` }}
-    >
-      <section className="map-workspace">
-        <header className="topbar">
-          <div className="topbar-title">
-            <h1>Dispatcher Dashboard</h1>
-          </div>
-
-          <div className="force-picker">
-            <input
-              id="force-search"
-              list="police-force-options"
-              value={forceSearch}
-              onChange={(event) => {
-                const nextValue = event.target.value;
-                setForceSearch(nextValue);
-
-                if (policeForces.includes(nextValue)) {
-                  setSelectedForce(nextValue);
-                }
-              }}
-              placeholder="Search police force"
-              disabled={policeForces.length === 0}
-            />
-            <datalist id="police-force-options">
-              {filteredPoliceForces.map((force) => (
-                <option key={force} value={force}>
-                  {force}
-                </option>
-              ))}
-            </datalist>
-          </div>
-
-          <div className="dispatcher-user">
-            <span>DS</span>
-            <div>
-              <strong>Dispatcher Smith</strong>
-              <small>Control Room</small>
+    <>
+      {/* flashing alert */}
+      {incomingAlert && (
+        <div className="urgent-alert-overlay">
+          <div className="urgent-alert-box">
+            <h2>Urgent: SOS Received</h2>
+            <p><strong>Type:</strong> {incomingAlert.type}</p>
+            <p><strong>Details:</strong> {incomingAlert.details}</p>
+            
+            <div className="urgent-alert-actions">
+              <button 
+                className="secondary-action" 
+                onClick={() => setIncomingAlert(null)}
+              >
+                Dismiss
+              </button>
+              <button 
+                className="danger-action" 
+                onClick={() => {
+                  setIncomingAlert(null); // Close the flash
+                  openDispatch(incomingAlert); // Open the dispatch menu
+                }}
+              >
+                Dispatch Cars
+              </button>
             </div>
           </div>
-        </header>
+        </div>
+      )}
+
+      {/* main dashboard grid*/}
+      <main
+        className="dashboard"
+        style={{ gridTemplateColumns: `minmax(420px, 1fr) 10px ${sidebarWidth}px` }}
+      >
+        <section className="map-workspace">
+          <header className="topbar">
+            <div className="topbar-title">
+              <h1>Dispatcher Dashboard</h1>
+            </div>
+
+            <div className="force-picker">
+              <input
+                id="force-search"
+                list="police-force-options"
+                value={forceSearch}
+                onChange={(event) => {
+                  const nextValue = event.target.value;
+                  setForceSearch(nextValue);
+
+                  if (policeForces.includes(nextValue)) {
+                    setSelectedForce(nextValue);
+                  }
+                }}
+                placeholder="Search police force"
+                disabled={policeForces.length === 0}
+              />
+              <datalist id="police-force-options">
+                {filteredPoliceForces.map((force) => (
+                  <option key={force} value={force}>
+                    {force}
+                  </option>
+                ))}
+              </datalist>
+            </div>
+
+            <div className="dispatcher-user">
+              <span>DS</span>
+              <div>
+                <strong>Dispatcher Smith</strong>
+                <small>Control Room</small>
+              </div>
+            </div>
+          </header>
 
         <section className="map-shell" aria-label="Dispatcher Google Map">
           <DispatcherMap
@@ -980,38 +1011,38 @@ function App() {
             focusTarget={mapFocusTarget}
           />
 
-          <div className="map-card map-card-top">
-            <strong>Selected force boundary</strong>
-          </div>
-
-          {layers.clusters && kMeansZones.length > 0 && (
-            <div className="cluster-legend">
-              <strong>Daily zones</strong>
-              {Object.entries(clusterNames).map(([cluster, name]) => (
-                <label className="legend-row" key={cluster}>
-                  <input
-                    type="checkbox"
-                    checked={visibleClusters.includes(Number(cluster))}
-                    onChange={() => toggleCluster(Number(cluster))}
-                  />
-                  <span
-                    className="legend-swatch"
-                    style={{ background: clusterColor(Number(cluster)) }}
-                  ></span>
-                  <span>{name}</span>
-                </label>
-              ))}
+            <div className="map-card map-card-top">
+              <strong>Selected force boundary</strong>
             </div>
-          )}
-        </section>
-      </section>
 
-      <div
-        className="splitter splitter-horizontal"
-        role="separator"
-        aria-orientation="vertical"
-        onMouseDown={startHorizontalResize}
-      ></div>
+            {layers.clusters && kMeansZones.length > 0 && (
+              <div className="cluster-legend">
+                <strong>Daily zones</strong>
+                {Object.entries(clusterNames).map(([cluster, name]) => (
+                  <label className="legend-row" key={cluster}>
+                    <input
+                      type="checkbox"
+                      checked={visibleClusters.includes(Number(cluster))}
+                      onChange={() => toggleCluster(Number(cluster))}
+                    />
+                    <span
+                      className="legend-swatch"
+                      style={{ background: clusterColor(Number(cluster)) }}
+                    ></span>
+                    <span>{name}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+          </section>
+        </section>
+
+        <div
+          className="splitter splitter-horizontal"
+          role="separator"
+          aria-orientation="vertical"
+          onMouseDown={startHorizontalResize}
+        ></div>
 
       <aside className="sidebar">
         {newReportNotice && (
@@ -1083,57 +1114,57 @@ function App() {
           </div>
         </section>
 
-        <div
-          className="splitter splitter-vertical"
-          role="separator"
-          aria-orientation="horizontal"
-          onMouseDown={startVerticalResize}
-        ></div>
+          <div
+            className="splitter splitter-vertical"
+            role="separator"
+            aria-orientation="horizontal"
+            onMouseDown={startVerticalResize}
+          ></div>
 
-        <section className="panel compact-panel">
-          <div className="panel-heading">
-            <span>Daily Patrol Route</span>
-          </div>
-          <div className="control-grid">
-            <button className="secondary-action small-action" onClick={showPatrolRoutes} disabled={isPatrolRouteLoading}>
-              {isPatrolRouteLoading ? "Generating..." : "Generate Patrol Route"}
-            </button>
-          </div>
-          <div className="route-summary">
-            <p>
-              <b>Estimated loop:</b>{" "}
-              {patrolRouteMinutes ? `${Math.round(patrolRouteMinutes)} min` : "Not generated"}
-            </p>
-            <p>
-              <b>Route status:</b>{" "}
-              {isPatrolRouteLoading ? "Checking live traffic" : isPatrolRouteGenerated ? "Ready for review" : "Waiting for dispatcher"}
-            </p>
-            {patrolRoute.length > 0 && (
+          <section className="panel compact-panel">
+            <div className="panel-heading">
+              <span>Daily Patrol Route</span>
+            </div>
+            <div className="control-grid">
+              <button className="secondary-action small-action" onClick={showPatrolRoutes} disabled={isPatrolRouteLoading}>
+                {isPatrolRouteLoading ? "Generating..." : "Generate Patrol Route"}
+              </button>
+            </div>
+            <div className="route-summary">
               <p>
-                <b>Stops:</b> {Math.max(patrolRoute.length - 2, 0)} hotspots
+                <b>Estimated loop:</b>{" "}
+                {patrolRouteMinutes ? `${Math.round(patrolRouteMinutes)} min` : "Not generated"}
               </p>
-            )}
-            {patrolRouteError && <p className="dispatch-error">{patrolRouteError}</p>}
-          </div>
-        </section>
+              <p>
+                <b>Route status:</b>{" "}
+                {isPatrolRouteLoading ? "Checking live traffic" : isPatrolRouteGenerated ? "Ready for review" : "Waiting for dispatcher"}
+              </p>
+              {patrolRoute.length > 0 && (
+                <p>
+                  <b>Stops:</b> {Math.max(patrolRoute.length - 2, 0)} hotspots
+                </p>
+              )}
+              {patrolRouteError && <p className="dispatch-error">{patrolRouteError}</p>}
+            </div>
+          </section>
 
-        <section className="panel compact-panel">
-          <div className="panel-heading">
-            <span>Map Layers</span>
-          </div>
-          <div className="filters">
-            {Object.entries(layers).map(([key, enabled]) => (
-              <label key={key} className="check-row">
-                <input
-                  type="checkbox"
-                  checked={enabled}
-                  onChange={() => toggleLayer(key as LayerKey)}
-                />
-                <span>{layerLabel(key as LayerKey)}</span>
-              </label>
-            ))}
-          </div>
-        </section>
+          <section className="panel compact-panel">
+            <div className="panel-heading">
+              <span>Map Layers</span>
+            </div>
+            <div className="filters">
+              {Object.entries(layers).map(([key, enabled]) => (
+                <label key={key} className="check-row">
+                  <input
+                    type="checkbox"
+                    checked={enabled}
+                    onChange={() => toggleLayer(key as LayerKey)}
+                  />
+                  <span>{layerLabel(key as LayerKey)}</span>
+                </label>
+              ))}
+            </div>
+          </section>
 
         <section className="panel feed-panel">
           <div className="panel-heading">
