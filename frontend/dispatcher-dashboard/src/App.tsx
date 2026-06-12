@@ -4,6 +4,13 @@ import {io} from "socket.io-client";
 
 const socket = io("http://localhost:8000")
 
+const FLEET_SIMULATION_INTERVAL_MS = 3000;
+const EMERGENCY_ROUTE_POINTS_PER_TICK = 3;
+const PATROL_ROUTE_POINTS_PER_TICK = 2;
+const PATROL_HOTSPOT_DWELL_TICKS = 10;
+const MIN_SIMULATED_CARS = 1;
+const MAX_SIMULATED_CARS = 30;
+
 type LayerKey = "clusters" | "patrolRoute" | "officers" | "incidents" | "emergencyRoute";
 
 type FleetUnit = {
@@ -29,6 +36,7 @@ type Incident = {
   source: string;
   reporter: string;
   details: string;
+  policeForce: string;
 };
 
 type PoliceFeature = {
@@ -92,6 +100,27 @@ type DeploymentResponse = {
   };
   message?: string;
 };
+
+type DeploymentRoute = {
+  incidentId: string;
+  carId: string;
+  route: { lat: number; lng: number }[];
+};
+
+type RouteProgress = {
+  route: { lat: number; lng: number }[];
+  index: number;
+  dwellTicksRemaining?: number;
+};
+
+type FleetStatusUpdate = Record<
+  string,
+  {
+    lat: number;
+    lng: number;
+    status: FleetUnit["status"];
+  }
+>;
 
 type PatrolRouteNode = {
   lat: number;
@@ -209,44 +238,7 @@ const initialFleet: FleetUnit[] = [
   },
 ];
 
-const initialIncidents: Incident[] = [
-  {
-    id: "INC-2401",
-    type: "Violence or threat",
-    time: "14:42",
-    priority: "High",
-    status: "pending",
-    position: { lat: 52.49, lng: -1.884 },
-    address: "Not provided",
-    source: "simulated_device_location",
-    reporter: "Verified reporter #0241",
-    details: "Witness reports shouting near the junction",
-  },
-  {
-    id: "INC-2399",
-    type: "Vehicle crime",
-    time: "14:19",
-    priority: "Medium",
-    status: "pending",
-    position: { lat: 52.512, lng: -1.902 },
-    address: "New Street station, Station St, Birmingham B2 4QA, UK",
-    source: "google_address_search",
-    reporter: "Verified reporter #0241",
-    details: "No details provided",
-  },
-  {
-    id: "INC-2396",
-    type: "Anti-social behaviour",
-    time: "13:57",
-    priority: "Low",
-    status: "pending",
-    position: { lat: 52.475, lng: -1.914 },
-    address: "Not provided",
-    source: "simulated_device_location",
-    reporter: "Verified reporter #0241",
-    details: "Group blocking the entrance",
-  },
-];
+const initialIncidents: Incident[] = [];
 
 const googleMapsApiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined;
 const apiUrl = (import.meta.env.VITE_API_URL as string | undefined) || "http://localhost:8000";
@@ -272,6 +264,13 @@ const clusterColors: Record<number, string> = {
   3: "#F2C94C",
 };
 
+const fleetStateLabels: Record<FleetUnit["status"], string> = {
+  available: "State 1: Available",
+  patrolling: "State 2: Patrolling",
+  responding: "State 3: Responding",
+  scene: "State 4: At scene",
+};
+
 function App() {
   const [policeForces, setPoliceForces] = useState<string[]>([]);
   const [selectedForce, setSelectedForce] = useState("");
@@ -283,11 +282,13 @@ function App() {
   const [kMeansZones, setKMeansZones] = useState<KMeansZone[]>([]);
   const [visibleClusters, setVisibleClusters] = useState<number[]>(Object.keys(clusterNames).map(Number));
   const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null);
-  const [incidents, setIncidents] = useState<Incident[]>(initialIncidents);
+  const [allIncidents, setAllIncidents] = useState<Incident[]>(initialIncidents);
+  const [sceneIncidents, setSceneIncidents] = useState<Incident[]>([]);
   const [fleet, setFleet] = useState<FleetUnit[]>(initialFleet);
+  const [fleetSimulationSize, setFleetSimulationSize] = useState(initialFleet.length);
   const [sidebarWidth, setSidebarWidth] = useState(430);
   const [reportsHeight, setReportsHeight] = useState(360);
-  const [deploymentRoutes, setDeploymentRoutes] = useState<{ carId: string; route: { lat: number; lng: number }[] }[]>([]);
+  const [deploymentRoutes, setDeploymentRoutes] = useState<DeploymentRoute[]>([]);
   const [patrolRoute, setPatrolRoute] = useState<PatrolRouteNode[]>([]);
   const [patrolRoadRoute, setPatrolRoadRoute] = useState<{ lat: number; lng: number }[]>([]);
   const [patrolRouteMinutes, setPatrolRouteMinutes] = useState<number | null>(null);
@@ -297,11 +298,68 @@ function App() {
   const [dispatchError, setDispatchError] = useState("");
   const [isDispatching, setIsDispatching] = useState(false);
   const [mapFocusTarget, setMapFocusTarget] = useState<MapFocusTarget | null>(null);
+  const [newReportNoticeId, setNewReportNoticeId] = useState<string | null>(null);
+  const [policeGeoJson, setPoliceGeoJson] = useState<PoliceFeatureCollection | null>(null);
+  const fleetRef = useRef<FleetUnit[]>(initialFleet);
+  const emergencyRouteProgressRef = useRef<Record<string, RouteProgress>>({});
+  const patrolRouteProgressRef = useRef<Record<string, RouteProgress>>({});
+  const pendingPatrolRouteRequestsRef = useRef<Set<string>>(new Set());
+  const policeGeoJsonRef = useRef<PoliceFeatureCollection | null>(null);
+  const selectedForceRef = useRef("");
 
+  const incidents = useMemo(
+    () => allIncidents.filter((incident) => !selectedForce || incident.policeForce === selectedForce),
+    [allIncidents, selectedForce],
+  );
+  const mapIncidents = useMemo(
+    () => [
+      ...incidents,
+      ...sceneIncidents.filter((incident) => !selectedForce || incident.policeForce === selectedForce),
+    ],
+    [incidents, sceneIncidents, selectedForce],
+  );
   const activeIncident = selectedIncident || incidents[0];
+  const dispatchableFleet = fleet.filter((car) => car.status === "available" || car.status === "patrolling");
+  const maxDispatchableCars = dispatchableFleet.length;
+  const newReportNotice = incidents.find(
+    (incident) => incident.id === newReportNoticeId && incident.status === "pending",
+  );
   const filteredPoliceForces = policeForces.filter((force) =>
     force.toLowerCase().includes(forceSearch.toLowerCase()),
   );
+
+  useEffect(() => {
+    policeGeoJsonRef.current = policeGeoJson;
+  }, [policeGeoJson]);
+
+  useEffect(() => {
+    selectedForceRef.current = selectedForce;
+  }, [selectedForce]);
+
+  useEffect(() => {
+    fleetRef.current = fleet;
+  }, [fleet]);
+
+  useEffect(() => {
+    setSelectedIncident((currentIncident) => {
+      if (!currentIncident || !selectedForce || currentIncident.policeForce === selectedForce) {
+        return currentIncident;
+      }
+
+      setShowDetails(false);
+      setShowEmergency(false);
+      return null;
+    });
+
+    const latestPendingIncident = incidents.find((incident) => incident.status === "pending");
+    setNewReportNoticeId((currentNoticeId) => {
+      const currentNoticeStillVisible = incidents.some(
+        (incident) => incident.id === currentNoticeId && incident.status === "pending",
+      );
+
+      return currentNoticeStillVisible ? currentNoticeId : latestPendingIncident?.id || null;
+    });
+  }, [incidents, selectedForce]);
 
   useEffect(() => {
     Promise.all([
@@ -319,6 +377,7 @@ function App() {
 
         const zones = parseClusterCsv(csvText);
 
+        setPoliceGeoJson(geoJson);
         setPoliceForces(forceNames);
         setSelectedForce((current) => current || forceNames[0] || "");
         setForceSearch((current) => current || forceNames[0] || "");
@@ -330,11 +389,21 @@ function App() {
   }, []);
 
   useEffect(() => {
-    // Listen for Live Citizen SOS Emergencies
+    // get live citizen incident reports 
     socket.on("dispatch_alert", (data: any) => {
       console.log("Real-time Citizen SOS alert received!", data);
+
+      const reportForce = findPoliceForceForPoint(
+        Number(data.lat),
+        Number(data.lng),
+        policeGeoJsonRef.current,
+      );
+      if (!reportForce) {
+        console.log("Ignoring citizen SOS because it could not be matched to a police force boundary.");
+        return;
+      }
       
-      // Generate a new dynamic incident card for the dashboard
+      // create a new incident card in the "Incidents" tab 
       const dynamicIncident: Incident = {
         id: `INC-${Math.floor(1000 + Math.random() * 9000)}`,
         type: data.crime_type || "Citizen SOS Emergency",
@@ -346,22 +415,26 @@ function App() {
         source: "citizen_app_sos",
         reporter: "Mobile User",
         details: data.details,
+        policeForce: reportForce,
       };
 
-      // Push it to the top of the dispatcher's incoming reports list
-      setIncidents((prevIncidents) => [dynamicIncident, ...prevIncidents]);
+      // Store every report received, but only display the ones within the current Police Force boundary 
+      setAllIncidents((prevIncidents) => [dynamicIncident, ...prevIncidents]);
+      if (reportForce === selectedForceRef.current) {
+        setNewReportNoticeId(dynamicIncident.id);
+      }
     });
 
-    // Listen for Live GPS Fleet Location Updates
+    // Live gps fleet loc updates
     socket.on("fleet_update", (serverFleet: Record<string, [number, number]>) => {
       console.log("Received fleet GPS tracking matrix:", serverFleet);
       
-      // Map the backend dictionary data format into the frontend state structures
       setFleet((currentFleet) =>
         currentFleet.map((car) => {
           const backendKey = car.id.replace(" ", "_"); 
-          if (serverFleet[backendKey]) {
-            const [lat, lng] = serverFleet[backendKey];
+          const serverLocation = serverFleet[car.id] || serverFleet[backendKey];
+          if (serverLocation) {
+            const [lat, lng] = serverLocation;
             return {
               ...car,
               position: { lat, lng },
@@ -372,11 +445,206 @@ function App() {
       );
     });
 
+    socket.on("fleet_status_update", (serverFleet: FleetStatusUpdate) => {
+      console.log("Received fleet status update:", serverFleet);
+
+      setFleet((currentFleet) =>
+        currentFleet.map((car) => {
+          const backendKey = car.id.replace(" ", "_");
+          const serverCar = serverFleet[car.id] || serverFleet[backendKey];
+
+          if (!serverCar) {
+            return car;
+          }
+
+          return {
+            ...car,
+            state: fleetStateLabels[serverCar.status],
+            status: serverCar.status,
+            position: {
+              lat: serverCar.lat,
+              lng: serverCar.lng,
+            },
+          };
+        })
+      );
+    });
+
     return () => {
       socket.off("dispatch_alert");
       socket.off("fleet_update");
+      socket.off("fleet_status_update");
     };
   }, []);
+
+  useEffect(() => {
+    if (!selectedForce || !policeGeoJson) {
+      return;
+    }
+
+    const selectedFeature = policeGeoJson.features.find(
+      (feature) => feature.properties.PFA23NM === selectedForce,
+    );
+
+    if (!selectedFeature) {
+      return;
+    }
+
+    const { fleet: repositionedFleet, sceneIncidents: nextSceneIncidents } = createFleetSimulation(
+      fleetRef.current.length,
+      selectedForce,
+      selectedFeature,
+      kMeansZones,
+      fleetRef.current.map((car) => car.status),
+    );
+
+    fleetRef.current = repositionedFleet;
+    setFleet(repositionedFleet);
+    setSceneIncidents(nextSceneIncidents);
+    replaceFleetOnServer(repositionedFleet);
+
+    patrolRouteProgressRef.current = {};
+    pendingPatrolRouteRequestsRef.current.clear();
+    emergencyRouteProgressRef.current = {};
+    setDeploymentRoutes([]);
+
+    const intervalId = window.setInterval(() => {
+      const nextFleet: FleetUnit[] = fleetRef.current.map((car) => {
+        if (car.status === "responding") {
+          const routeProgress = emergencyRouteProgressRef.current[car.id];
+
+          if (!routeProgress || routeProgress.route.length === 0) {
+            return car;
+          }
+
+          const nextIndex = Math.min(
+            routeProgress.index + EMERGENCY_ROUTE_POINTS_PER_TICK,
+            routeProgress.route.length - 1,
+          );
+          const nextPosition = routeProgress.route[nextIndex];
+
+          emergencyRouteProgressRef.current[car.id] = {
+            ...routeProgress,
+            index: nextIndex,
+          };
+
+          if (nextIndex >= routeProgress.route.length - 1) {
+            delete emergencyRouteProgressRef.current[car.id];
+            return {
+              ...car,
+              state: fleetStateLabels.scene,
+              status: "scene",
+              position: nextPosition,
+            };
+          }
+
+          return {
+            ...car,
+            position: nextPosition,
+          };
+        }
+
+        if (car.status === "scene") {
+          return car;
+        }
+
+        if (car.status === "available") {
+          return car;
+        }
+
+        if (car.status === "patrolling") {
+          const routeProgress = patrolRouteProgressRef.current[car.id];
+
+          if (!routeProgress || routeProgress.route.length === 0) {
+            requestPatrolRouteForCar(car, selectedFeature, kMeansZones, patrolRouteProgressRef, pendingPatrolRouteRequestsRef);
+            return car;
+          }
+
+          if ((routeProgress.dwellTicksRemaining || 0) > 0) {
+            patrolRouteProgressRef.current[car.id] = {
+              ...routeProgress,
+              dwellTicksRemaining: (routeProgress.dwellTicksRemaining || 0) - 1,
+            };
+            return car;
+          }
+
+          if (routeProgress.route.length < 2) {
+            delete patrolRouteProgressRef.current[car.id];
+            requestPatrolRouteForCar(
+              car,
+              selectedFeature,
+              kMeansZones,
+              patrolRouteProgressRef,
+              pendingPatrolRouteRequestsRef,
+            );
+            return car;
+          }
+
+          const nextIndex = Math.min(
+            routeProgress.index + PATROL_ROUTE_POINTS_PER_TICK,
+            routeProgress.route.length - 1,
+          );
+          const nextPosition = routeProgress.route[nextIndex];
+
+          if (nextIndex >= routeProgress.route.length - 1) {
+            patrolRouteProgressRef.current[car.id] = {
+              route: [nextPosition],
+              index: 0,
+              dwellTicksRemaining: PATROL_HOTSPOT_DWELL_TICKS,
+            };
+          } else {
+            patrolRouteProgressRef.current[car.id] = {
+              ...routeProgress,
+              index: nextIndex,
+            };
+          }
+
+          return {
+            ...car,
+            position: nextPosition,
+          };
+        }
+
+        return car;
+      });
+
+      fleetRef.current = nextFleet;
+      setFleet(nextFleet);
+      emitFleetLocations(nextFleet);
+    }, FLEET_SIMULATION_INTERVAL_MS);
+
+    return () => window.clearInterval(intervalId);
+  }, [kMeansZones, policeGeoJson, selectedForce]);
+
+  function generateFleetSimulation() {
+    if (!selectedForce || !policeGeoJson) {
+      return;
+    }
+
+    const selectedFeature = policeGeoJson.features.find(
+      (feature) => feature.properties.PFA23NM === selectedForce,
+    );
+
+    if (!selectedFeature) {
+      return;
+    }
+
+    const { fleet: nextFleet, sceneIncidents: nextSceneIncidents } = createFleetSimulation(
+      fleetSimulationSize,
+      selectedForce,
+      selectedFeature,
+      kMeansZones,
+    );
+
+    fleetRef.current = nextFleet;
+    patrolRouteProgressRef.current = {};
+    pendingPatrolRouteRequestsRef.current.clear();
+    emergencyRouteProgressRef.current = {};
+    setDeploymentRoutes([]);
+    setFleet(nextFleet);
+    setSceneIncidents(nextSceneIncidents);
+    replaceFleetOnServer(nextFleet);
+  }
 
   function toggleLayer(layer: LayerKey) {
     setLayers((current) => ({
@@ -470,12 +738,47 @@ function App() {
 
   function openDispatch(incident: Incident) {
     setSelectedIncident(incident);
-    setOfficersRequired(2);
+    setOfficersRequired(Math.min(2, Math.max(1, maxDispatchableCars)));
     setShowEmergency(true);
+  }
+
+  function reviewIncident(incident: Incident) {
+    setSelectedIncident(incident);
+    setMapFocusTarget({ type: "incident", id: incident.id, position: incident.position });
+    setShowDetails(true);
+  }
+
+  function removeIncident(incidentId: string) {
+    setAllIncidents((currentIncidents) => currentIncidents.filter((incident) => incident.id !== incidentId));
+    setDeploymentRoutes((currentRoutes) =>
+      currentRoutes.filter((route) => route.incidentId !== incidentId),
+    );
+    setNewReportNoticeId((currentNoticeId) => (currentNoticeId === incidentId ? null : currentNoticeId));
+    setSelectedIncident((currentIncident) => {
+      if (currentIncident?.id !== incidentId) {
+        return currentIncident;
+      }
+
+      setShowDetails(false);
+      setShowEmergency(false);
+      return null;
+    });
   }
 
   async function dispatchOfficers() {
     if (!activeIncident) {
+      return;
+    }
+
+    if (maxDispatchableCars === 0) {
+      setDispatchError("No available or patrolling cars can be dispatched.");
+      return;
+    }
+
+    if (officersRequired > maxDispatchableCars) {
+      setDispatchError(
+        `Only ${maxDispatchableCars} available or patrolling car${maxDispatchableCars === 1 ? "" : "s"} can be dispatched.`,
+      );
       return;
     }
 
@@ -493,6 +796,7 @@ function App() {
           lat: activeIncident.position.lat,
           lng: activeIncident.position.lng,
           officers_needed: officersRequired,
+          active_car_ids: fleetRef.current.map((car) => car.id),
         }),
       });
 
@@ -502,28 +806,61 @@ function App() {
         throw new Error(result.message || "Deployment request failed");
       }
 
-      const assignedIds = new Set(result.data.assigned_officers.map((officer) => officer.car_id));
-
-      setFleet((currentFleet) =>
-        currentFleet.map((car) =>
-          assignedIds.has(car.id)
-            ? { ...car, state: "State 3: Responding", status: "responding" }
-            : car,
-        ),
+      const currentCarIds = new Set(fleetRef.current.map((car) => car.id));
+      const assignedOfficers = result.data.assigned_officers.filter((officer) =>
+        currentCarIds.has(officer.car_id),
       );
-      setDeploymentRoutes(
-        result.data.assigned_officers.map((officer) => ({
+
+      if (assignedOfficers.length === 0) {
+        throw new Error("Deployment returned no cars from the current fleet.");
+      }
+
+      if (assignedOfficers.length < officersRequired) {
+        throw new Error(
+          `Only ${assignedOfficers.length} current fleet car${assignedOfficers.length === 1 ? "" : "s"} could be assigned.`,
+        );
+      }
+
+      const assignedIds = new Set(assignedOfficers.map((officer) => officer.car_id));
+      const assignedRoutes = Object.fromEntries(
+        assignedOfficers.map((officer) => [officer.car_id, officer.route]),
+      );
+
+      assignedOfficers.forEach((officer) => {
+        emergencyRouteProgressRef.current[officer.car_id] = {
+          route: officer.route,
+          index: 0,
+        };
+      });
+
+      const nextFleet: FleetUnit[] = fleetRef.current.map((car) =>
+        assignedIds.has(car.id)
+          ? {
+              ...car,
+              state: fleetStateLabels.responding,
+              status: "responding",
+              position: assignedRoutes[car.id]?.[0] || car.position,
+            }
+          : car,
+      );
+      fleetRef.current = nextFleet;
+      setFleet(nextFleet);
+      emitFleetLocations(nextFleet);
+      setDeploymentRoutes((currentRoutes) => [
+        ...currentRoutes.filter((route) => route.incidentId !== activeIncident.id),
+        ...assignedOfficers.map((officer) => ({
+          incidentId: activeIncident.id,
           carId: officer.car_id,
           route: officer.route,
         })),
-      );
+      ]);
     } catch (error) {
       setDispatchError(error instanceof Error ? error.message : "Deployment request failed");
       setIsDispatching(false);
       return;
     }
 
-    setIncidents((currentIncidents) =>
+    setAllIncidents((currentIncidents) =>
       currentIncidents.map((incident) =>
         incident.id === activeIncident.id ? { ...incident, status: "dispatched" } : incident,
       ),
@@ -532,6 +869,9 @@ function App() {
       currentIncident?.id === activeIncident.id
         ? { ...currentIncident, status: "dispatched" }
         : currentIncident,
+    );
+    setNewReportNoticeId((currentNoticeId) =>
+      currentNoticeId === activeIncident.id ? null : currentNoticeId,
     );
     setLayers((current) => ({ ...current, officers: true, emergencyRoute: true }));
     setIsDispatching(false);
@@ -630,7 +970,7 @@ function App() {
             selectedForce={selectedForce}
             layers={layers}
             fleet={fleet}
-            incidents={incidents}
+            incidents={mapIncidents}
             kMeansZones={kMeansZones}
             visibleClusters={visibleClusters}
             deploymentRoutes={deploymentRoutes}
@@ -674,41 +1014,72 @@ function App() {
       ></div>
 
       <aside className="sidebar">
+        {newReportNotice && (
+          <aside className="new-report-notice" role="status" aria-live="polite">
+            <span className="notice-pulse" aria-hidden="true"></span>
+            <div className="notice-content">
+              <span>New pending report</span>
+              <strong>{newReportNotice.id}</strong>
+              <p>{newReportNotice.type} · {newReportNotice.time}</p>
+            </div>
+            <button
+              className="notice-close"
+              type="button"
+              aria-label="Close new report notification"
+              onClick={() => setNewReportNoticeId(null)}
+            >
+              x
+            </button>
+          </aside>
+        )}
+
         <section className="panel reports-panel" style={{ height: reportsHeight }}>
           <div className="panel-heading">
             <span>Incoming Reports</span>
           </div>
           <div className="incoming-reports">
-            {incidents.map((incident) => (
-              <article className="report-card" key={incident.id}>
-                <header className="report-header">
-                  <strong>{incident.id}</strong>
-                  <span className={incident.status}>{incident.status}</span>
-                </header>
-                <div className="report-summary">
-                  <p><b>{incident.type}</b></p>
-                  <p>{incident.time} · {incident.priority} priority</p>
-                  <p>{incident.address}</p>
-                </div>
-                <div className="report-actions">
-                  <button
-                    className="secondary-action small-action"
-                    onClick={() => {
-                      setSelectedIncident(incident);
-                      setShowDetails(true);
-                    }}
-                  >
-                    View details
-                  </button>
-                  <button
-                    className="primary-action small-action"
-                    onClick={() => openDispatch(incident)}
-                  >
-                    Dispatch
-                  </button>
-                </div>
-              </article>
-            ))}
+            {incidents.length === 0 ? (
+              <div className="empty-reports">No crime reports received.</div>
+            ) : (
+              incidents.map((incident) => (
+                <article className="report-card" key={incident.id}>
+                  {incident.status === "dispatched" && (
+                    <button
+                      className="remove-report"
+                      type="button"
+                      aria-label={`Remove ${incident.id}`}
+                      onClick={() => removeIncident(incident.id)}
+                    >
+                      x
+                    </button>
+                  )}
+                  <header className="report-header">
+                    <strong>{incident.id}</strong>
+                    <span className={incident.status}>{incident.status}</span>
+                  </header>
+                  <div className="report-summary">
+                    <p><b>{incident.type}</b></p>
+                    <p>{incident.time} · {incident.priority} priority</p>
+                    <p>{incident.address}</p>
+                  </div>
+                  <div className="report-actions">
+                    <button
+                      className="secondary-action small-action"
+                      onClick={() => reviewIncident(incident)}
+                    >
+                      View details
+                    </button>
+                    <button
+                      className="primary-action small-action"
+                      disabled={incident.status === "dispatched"}
+                      onClick={() => openDispatch(incident)}
+                    >
+                      Dispatch
+                    </button>
+                  </div>
+                </article>
+              ))
+            )}
           </div>
         </section>
 
@@ -769,6 +1140,31 @@ function App() {
             <span>Fleet Status</span>
             <small>{fleet.length} active units</small>
           </div>
+          <div className="fleet-simulation-controls">
+            <label className="mini-label" htmlFor="fleet-simulation-size">
+              Cars in simulation
+            </label>
+            <div className="fleet-simulation-row">
+              <input
+                id="fleet-simulation-size"
+                min={MIN_SIMULATED_CARS}
+                max={MAX_SIMULATED_CARS}
+                type="number"
+                value={fleetSimulationSize}
+                onChange={(event) => {
+                  const requestedCars = Number(event.target.value);
+                  const cappedCars = Math.min(
+                    Math.max(MIN_SIMULATED_CARS, requestedCars || MIN_SIMULATED_CARS),
+                    MAX_SIMULATED_CARS,
+                  );
+                  setFleetSimulationSize(cappedCars);
+                }}
+              />
+              <button className="secondary-action" type="button" onClick={generateFleetSimulation}>
+                Generate
+              </button>
+            </div>
+          </div>
           <div className="fleet-feed">
             {fleet.map((car) => (
               <button
@@ -819,6 +1215,9 @@ function App() {
               <p className="modal-copy">
                 Choose how many cars to send to {activeIncident.id}.
               </p>
+              <p className="dispatch-capacity">
+                {maxDispatchableCars} available or patrolling car{maxDispatchableCars === 1 ? "" : "s"} can be dispatched.
+              </p>
 
               <label className="field-label" htmlFor="officers-required">
                 Number of cars required
@@ -826,10 +1225,14 @@ function App() {
               <input
                 id="officers-required"
                 min={1}
-                max={fleet.length}
+                max={Math.max(1, maxDispatchableCars)}
                 type="number"
                 value={officersRequired}
-                onChange={(event) => setOfficersRequired(Number(event.target.value))}
+                onChange={(event) => {
+                  const requestedCars = Number(event.target.value);
+                  const cappedCars = Math.min(Math.max(1, requestedCars), Math.max(1, maxDispatchableCars));
+                  setOfficersRequired(cappedCars);
+                }}
               />
               {dispatchError && <p className="modal-error">{dispatchError}</p>}
 
@@ -837,7 +1240,7 @@ function App() {
                 <button className="secondary-action" onClick={() => setShowEmergency(false)}>
                   Review later
                 </button>
-                <button className="danger-action" disabled={isDispatching} onClick={dispatchOfficers}>
+                <button className="danger-action" disabled={isDispatching || maxDispatchableCars === 0} onClick={dispatchOfficers}>
                   {isDispatching ? "Dispatching..." : "Send cars"}
                 </button>
               </div>
@@ -859,6 +1262,7 @@ function App() {
               <p><b>Longitude:</b> {selectedIncident.position.lng.toFixed(6)}</p>
               <p><b>Address:</b> {selectedIncident.address}</p>
               <p><b>Time:</b> {selectedIncident.time}</p>
+              <p><b>Police force:</b> {selectedIncident.policeForce}</p>
               <p><b>Location source:</b> {selectedIncident.source}</p>
               <p><b>Reporter:</b> {selectedIncident.reporter}</p>
               <p><b>Details:</b> {selectedIncident.details}</p>
@@ -906,7 +1310,7 @@ function DispatcherMap({
   incidents: Incident[];
   kMeansZones: KMeansZone[];
   visibleClusters: number[];
-  deploymentRoutes: { carId: string; route: { lat: number; lng: number }[] }[];
+  deploymentRoutes: DeploymentRoute[];
   patrolRoute: PatrolRouteNode[];
   patrolRoadRoute: { lat: number; lng: number }[];
   isPatrolRouteGenerated: boolean;
@@ -917,7 +1321,9 @@ function DispatcherMap({
   const mapRef = useRef<any>(null);
   const dataLayerRef = useRef<any>(null);
   const clusterLayerRef = useRef<any>(null);
-  const markerRefs = useRef<any[]>([]);
+  const carMarkerRefs = useRef<Record<string, any>>({});
+  const incidentMarkerRefs = useRef<Record<string, any>>({});
+  const routeMarkerRefs = useRef<any[]>([]);
   const lineRefs = useRef<any[]>([]);
   const [isReady, setIsReady] = useState(false);
   const [loadError, setLoadError] = useState("");
@@ -1097,17 +1503,34 @@ function DispatcherMap({
       return;
     }
 
-    markerRefs.current.forEach((marker) => marker.setMap(null));
+    routeMarkerRefs.current.forEach((marker) => marker.setMap(null));
     lineRefs.current.forEach((line) => line.setMap(null));
-    markerRefs.current = [];
+    routeMarkerRefs.current = [];
     lineRefs.current = [];
+
+    const currentCarIds = new Set(fleet.map((car) => car.id));
+    Object.entries(carMarkerRefs.current).forEach(([carId, marker]) => {
+      if (!layers.officers || !currentCarIds.has(carId)) {
+        marker.setMap(null);
+        delete carMarkerRefs.current[carId];
+      }
+    });
 
     if (layers.officers) {
       fleet.forEach((car) => {
-        markerRefs.current.push(
-          new window.google.maps.Marker({
+        const existingMarker = carMarkerRefs.current[car.id];
+
+        if (existingMarker) {
+          existingMarker.setPosition(displayPositionForCar(car));
+          existingMarker.setTitle(`${car.id} - ${car.state}`);
+          existingMarker.setIcon(circleIcon(car.status));
+          existingMarker.setMap(mapRef.current);
+          return;
+        }
+
+        carMarkerRefs.current[car.id] = new window.google.maps.Marker({
             map: mapRef.current,
-            position: car.position,
+            position: displayPositionForCar(car),
             title: `${car.id} - ${car.state}`,
             label: {
               text: car.id.replace("Car ", ""),
@@ -1116,23 +1539,37 @@ function DispatcherMap({
               fontWeight: "900",
             },
             icon: circleIcon(car.status),
-          }),
-        );
+          });
       });
     }
 
+    const currentIncidentIds = new Set(incidents.map((incident) => incident.id));
+    Object.entries(incidentMarkerRefs.current).forEach(([incidentId, marker]) => {
+      if (!layers.incidents || !currentIncidentIds.has(incidentId)) {
+        marker.setMap(null);
+        delete incidentMarkerRefs.current[incidentId];
+      }
+    });
+
     if (layers.incidents) {
       incidents.forEach((incident) => {
-        markerRefs.current.push(
-          createIncidentMarker({
+        const existingMarker = incidentMarkerRefs.current[incident.id];
+
+        if (existingMarker) {
+          existingMarker.setPosition(incident.position);
+          existingMarker.setTitle(`${incident.id} - ${incident.type}`);
+          existingMarker.setMap(mapRef.current);
+          return;
+        }
+
+        incidentMarkerRefs.current[incident.id] = createIncidentMarker({
             map: mapRef.current,
             incident,
             onClick: () => {
               mapRef.current.panTo(incident.position);
               mapRef.current.setZoom(15);
             },
-          }),
-        );
+          });
       });
     }
 
@@ -1148,7 +1585,7 @@ function DispatcherMap({
       );
 
       patrolRoute.slice(1, -1).forEach((stop, index) => {
-        markerRefs.current.push(
+        routeMarkerRefs.current.push(
           new window.google.maps.Marker({
             map: mapRef.current,
             position: stop,
@@ -1244,6 +1681,237 @@ function walkCoordinates(value: any, visit: (lng: number, lat: number) => void) 
   }
 
   value.forEach((item) => walkCoordinates(item, visit));
+}
+
+function findPoliceForceForPoint(lat: number, lng: number, policeGeoJson: PoliceFeatureCollection | null) {
+  if (!policeGeoJson) {
+    return "";
+  }
+
+  const matchingFeature = policeGeoJson.features.find((feature) =>
+    pointInFeature(lat, lng, feature),
+  );
+
+  return matchingFeature?.properties.PFA23NM || "";
+}
+
+function createFleetSimulation(
+  carCount: number,
+  selectedForce: string,
+  selectedFeature: PoliceFeature,
+  kMeansZones: KMeansZone[],
+  preferredStatuses: FleetUnit["status"][] = [],
+) {
+  const normalizedCount = Math.min(
+    Math.max(MIN_SIMULATED_CARS, Math.floor(carCount) || MIN_SIMULATED_CARS),
+    MAX_SIMULATED_CARS,
+  );
+  const fleet: FleetUnit[] = [];
+  const sceneIncidents: Incident[] = [];
+  const sceneGroups: { id: string; position: { lat: number; lng: number }; capacity: number; assigned: number }[] = [];
+
+  for (let index = 0; index < normalizedCount; index += 1) {
+    const id = `Car ${101 + index}`;
+    const preferredStatus = preferredStatuses[index];
+    const status = preferredStatus && preferredStatus !== "responding"
+      ? preferredStatus
+      : randomSimulationStatus();
+    let position = status === "patrolling"
+      ? choosePatrolHotspot(selectedFeature, kMeansZones)
+      : randomPointInFeature(selectedFeature);
+
+    if (status === "scene") {
+      let sceneGroup = sceneGroups.find((group) => group.assigned < group.capacity);
+
+      if (!sceneGroup || Math.random() < 0.35) {
+        const scenePosition = randomPointInFeature(selectedFeature);
+        const sceneId = `SIM-SCENE-${sceneGroups.length + 1}`;
+        sceneGroup = {
+          id: sceneId,
+          position: scenePosition,
+          capacity: 2 + Math.floor(Math.random() * 2),
+          assigned: 0,
+        };
+        sceneGroups.push(sceneGroup);
+        sceneIncidents.push({
+          id: sceneId,
+          type: "Simulated active incident",
+          time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+          priority: "High",
+          status: "dispatched",
+          position: scenePosition,
+          address: selectedForce,
+          source: "fleet_simulation",
+          reporter: "Simulation",
+          details: "Generated so at-scene units have a visible incident marker.",
+          policeForce: selectedForce,
+        });
+      }
+
+      sceneGroup.assigned += 1;
+      position = sceneGroup.position;
+    }
+
+    fleet.push({
+      id,
+      state: fleetStateLabels[status],
+      area: selectedForce,
+      status,
+      position,
+    });
+  }
+
+  return { fleet, sceneIncidents };
+}
+
+function randomSimulationStatus(): FleetUnit["status"] {
+  const roll = Math.random();
+
+  if (roll < 0.32) {
+    return "available";
+  }
+
+  if (roll < 0.78) {
+    return "patrolling";
+  }
+
+  return "scene";
+}
+
+function choosePatrolHotspot(selectedFeature: PoliceFeature, kMeansZones: KMeansZone[]) {
+  const hotspots = kMeansZones.filter((zone) =>
+    Number.isFinite(zone.latitude) &&
+    Number.isFinite(zone.longitude) &&
+    [1, 2].includes(zone.cluster) &&
+    pointInFeature(zone.latitude, zone.longitude, selectedFeature),
+  );
+
+  if (hotspots.length === 0) {
+    return randomPointInFeature(selectedFeature);
+  }
+
+  const redHotspots = hotspots.filter((zone) => zone.cluster === 1);
+  const orangeHotspots = hotspots.filter((zone) => zone.cluster === 2);
+  const useRed = redHotspots.length > 0 && (orangeHotspots.length === 0 || Math.random() < 0.75);
+  const candidates = useRed ? redHotspots : orangeHotspots;
+  const selected = candidates[Math.floor(Math.random() * candidates.length)];
+
+  return jitterPointInsideFeature(
+    { lat: selected.latitude, lng: selected.longitude },
+    selectedFeature,
+  );
+}
+
+function jitterPointInsideFeature(point: { lat: number; lng: number }, selectedFeature: PoliceFeature) {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const jittered = {
+      lat: point.lat + (Math.random() - 0.5) * 0.002,
+      lng: point.lng + (Math.random() - 0.5) * 0.002,
+    };
+
+    if (pointInFeature(jittered.lat, jittered.lng, selectedFeature)) {
+      return jittered;
+    }
+  }
+
+  return point;
+}
+
+function emitFleetLocations(fleet: FleetUnit[]) {
+  fleet.forEach((car) => {
+    socket.emit("update_location", {
+      car_id: car.id,
+      lat: car.position.lat,
+      lng: car.position.lng,
+      status: car.status,
+    });
+  });
+}
+
+function replaceFleetOnServer(fleet: FleetUnit[]) {
+  socket.emit("replace_fleet", {
+    fleet: fleet.map((car) => ({
+      car_id: car.id,
+      lat: car.position.lat,
+      lng: car.position.lng,
+      status: car.status,
+    })),
+  });
+}
+
+function requestPatrolRouteForCar(
+  car: FleetUnit,
+  selectedFeature: PoliceFeature,
+  kMeansZones: KMeansZone[],
+  patrolRouteProgressRef: React.MutableRefObject<Record<string, RouteProgress>>,
+  pendingRequestsRef: React.MutableRefObject<Set<string>>,
+) {
+  if (pendingRequestsRef.current.has(car.id) || !window.google?.maps) {
+    return;
+  }
+
+  pendingRequestsRef.current.add(car.id);
+  const service = new window.google.maps.DirectionsService();
+  const destination = choosePatrolHotspot(selectedFeature, kMeansZones);
+
+  service.route(
+    {
+      origin: car.position,
+      destination,
+      travelMode: window.google.maps.TravelMode.DRIVING,
+    },
+    (result: any, status: string) => {
+      pendingRequestsRef.current.delete(car.id);
+
+      if (status !== "OK" || !result?.routes?.[0]?.overview_path?.length) {
+        return;
+      }
+
+      patrolRouteProgressRef.current[car.id] = {
+        route: result.routes[0].overview_path.map((point: any) => ({
+          lat: point.lat(),
+          lng: point.lng(),
+        })),
+        index: 0,
+      };
+    },
+  );
+}
+
+function featureBounds(feature: PoliceFeature) {
+  const lngValues: number[] = [];
+  const latValues: number[] = [];
+  const geometry = feature.geometry as any;
+
+  walkCoordinates(geometry.coordinates, (lng, lat) => {
+    lngValues.push(lng);
+    latValues.push(lat);
+  });
+
+  return {
+    minLng: Math.min(...lngValues),
+    minLat: Math.min(...latValues),
+    maxLng: Math.max(...lngValues),
+    maxLat: Math.max(...latValues),
+  };
+}
+
+function randomPointInFeature(feature: PoliceFeature) {
+  const bounds = featureBounds(feature);
+
+  for (let attempt = 0; attempt < 10000; attempt += 1) {
+    const lat = bounds.minLat + Math.random() * (bounds.maxLat - bounds.minLat);
+    const lng = bounds.minLng + Math.random() * (bounds.maxLng - bounds.minLng);
+
+    if (pointInFeature(lat, lng, feature)) {
+      return { lat, lng };
+    }
+  }
+
+  return {
+    lat: Number(feature.properties.LAT) || 52.4862,
+    lng: Number(feature.properties.LONG) || -1.8904,
+  };
 }
 
 function parseClusterCsv(csvText: string) {
@@ -1344,6 +2012,21 @@ function circleIcon(status: FleetUnit["status"]) {
   };
 
   return circleSymbol(colorByStatus[status], 12);
+}
+
+function displayPositionForCar(car: FleetUnit) {
+  if (car.status !== "scene") {
+    return car.position;
+  }
+
+  const carNumber = Number(car.id.replace(/\D/g, "")) || 0;
+  const angle = ((carNumber % 8) / 8) * Math.PI * 2;
+  const offset = 0.00055 + (carNumber % 3) * 0.00008;
+
+  return {
+    lat: car.position.lat + Math.sin(angle) * offset,
+    lng: car.position.lng + Math.cos(angle) * offset,
+  };
 }
 
 function createIncidentMarker({

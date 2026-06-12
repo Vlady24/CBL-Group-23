@@ -27,6 +27,7 @@ class EmergencyTrigger(BaseModel):
     lng : float
     officers_needed : int
     incident_id : str | None = None
+    active_car_ids : list[str] | None = None
 
 class PatrolRouteRequest(BaseModel):
     police_force : str
@@ -45,9 +46,25 @@ live_police_fleet = {
 }
 
 fleet_status = {
-    car_id: "available"
-    for car_id in live_police_fleet
+    "Car 101": "available",
+    "Car 102": "responding",
+    "Car 103": "patrolling",
+    "Car 104": "scene",
+    "Car 105": "patrolling",
 }
+
+def normalize_car_id(car_id):
+    return str(car_id).replace("_", " ")
+
+def fleet_status_payload():
+    return {
+        car_id: {
+            "lat": location[0],
+            "lng": location[1],
+            "status": fleet_status.get(car_id, "available")
+        }
+        for car_id, location in live_police_fleet.items()
+    }
 
 def patrol_route_payload(route_data):
     return {
@@ -134,9 +151,15 @@ async def deploy_nearest_officers(data : EmergencyTrigger):
     )
 
     try:
+        active_car_ids = (
+            {normalize_car_id(car_id) for car_id in data.active_car_ids}
+            if data.active_car_ids
+            else None
+        )
         available_fleet = {
             car_id: location
             for car_id, location in live_police_fleet.items()
+            if active_car_ids is None or car_id in active_car_ids
             if fleet_status.get(car_id, "available") in {"available", "patrolling"}
         }
 
@@ -144,7 +167,10 @@ async def deploy_nearest_officers(data : EmergencyTrigger):
             raise ValueError("officers_needed must be at least 1")
 
         if data.officers_needed > len(available_fleet):
-            raise ValueError("Not enough available officers")
+            raise ValueError(
+                f"Not enough available officers "
+                f"({len(available_fleet)} available, {data.officers_needed} requested)"
+            )
 
         assignments = reversed_djikstra.find_nearest_officers(
             no_officers=data.officers_needed,
@@ -181,6 +207,7 @@ async def deploy_nearest_officers(data : EmergencyTrigger):
         }
 
         await sio.emit("deployment_update", payload)
+        await sio.emit("fleet_status_update", fleet_status_payload())
 
         return {
             "status": "success",
@@ -199,23 +226,53 @@ async def deploy_nearest_officers(data : EmergencyTrigger):
 @sio.on('connect')
 async def connect(sid, environ):
     print(f"Client connected: {sid}")
+    await sio.emit("fleet_status_update", fleet_status_payload(), to=sid)
 
 @sio.on('update_location')
 async def update_car_location(sid, data):
     # listens for live GPS ping from police cars on patrol
 
-    car_id = data.get('car_id')
+    car_id = normalize_car_id(data.get('car_id'))
     lat = data.get('lat')
     lng = data.get('lng')
+    status = data.get('status')
 
     if car_id and lat and lng:
         # update car's coordinates in server's memory
         live_police_fleet[car_id] = (lat, lng)
         fleet_status.setdefault(car_id, "available")
+        if status in {"available", "patrolling", "responding", "scene"}:
+            fleet_status[car_id] = status
         print(f"GPS Update: {car_id} moved to ({lat}, {lng})")
 
         # broadcast the new location to dispatcher's map
         await sio.emit('fleet_update', live_police_fleet)
+        await sio.emit("fleet_status_update", fleet_status_payload())
+
+@sio.on('replace_fleet')
+async def replace_fleet(sid, data):
+    next_fleet = data.get("fleet", [])
+
+    if not isinstance(next_fleet, list):
+        return
+
+    live_police_fleet.clear()
+    fleet_status.clear()
+
+    for car in next_fleet:
+        car_id = normalize_car_id(car.get("car_id"))
+        lat = car.get("lat")
+        lng = car.get("lng")
+        status = car.get("status")
+
+        if not car_id or lat is None or lng is None:
+            continue
+
+        live_police_fleet[car_id] = (lat, lng)
+        fleet_status[car_id] = status if status in {"available", "patrolling", "responding", "scene"} else "available"
+
+    await sio.emit('fleet_update', live_police_fleet)
+    await sio.emit("fleet_status_update", fleet_status_payload())
 
 @sio.on('citizen_sos')
 async def handle_emergency(sid, data):
