@@ -921,26 +921,29 @@ function App() {
 
   return (
     <>
-      {/* flashing alert */}
-      {incomingAlert && (
-        <div className="urgent-alert-overlay">
+      {newReportNotice && (
+        <div className="urgent-alert-overlay" role="status" aria-live="assertive">
           <div className="urgent-alert-box">
             <h2>Urgent: SOS Received</h2>
-            <p><strong>Type:</strong> {incomingAlert.type}</p>
-            <p><strong>Details:</strong> {incomingAlert.details}</p>
-            
+            <p><strong>ID:</strong> {newReportNotice.id}</p>
+            <p><strong>Type:</strong> {newReportNotice.type}</p>
+            <p><strong>Time:</strong> {newReportNotice.time}</p>
+            <p><strong>Details:</strong> {newReportNotice.details}</p>
+
             <div className="urgent-alert-actions">
-              <button 
-                className="secondary-action" 
-                onClick={() => setIncomingAlert(null)}
+              <button
+                className="secondary-action"
+                type="button"
+                onClick={() => setNewReportNoticeId(null)}
               >
                 Dismiss
               </button>
-              <button 
-                className="danger-action" 
+              <button
+                className="danger-action"
+                type="button"
                 onClick={() => {
-                  setIncomingAlert(null); // Close the flash
-                  openDispatch(incomingAlert); // Open the dispatch menu
+                  setNewReportNoticeId(null);
+                  openDispatch(newReportNotice);
                 }}
               >
                 Dispatch Cars
@@ -950,7 +953,6 @@ function App() {
         </div>
       )}
 
-      {/* main dashboard grid*/}
       <main
         className="dashboard"
         style={{ gridTemplateColumns: `minmax(420px, 1fr) 10px ${sidebarWidth}px` }}
@@ -1045,25 +1047,6 @@ function App() {
         ></div>
 
       <aside className="sidebar">
-        {newReportNotice && (
-          <aside className="new-report-notice" role="status" aria-live="polite">
-            <span className="notice-pulse" aria-hidden="true"></span>
-            <div className="notice-content">
-              <span>New pending report</span>
-              <strong>{newReportNotice.id}</strong>
-              <p>{newReportNotice.type} · {newReportNotice.time}</p>
-            </div>
-            <button
-              className="notice-close"
-              type="button"
-              aria-label="Close new report notification"
-              onClick={() => setNewReportNoticeId(null)}
-            >
-              x
-            </button>
-          </aside>
-        )}
-
         <section className="panel reports-panel" style={{ height: reportsHeight }}>
           <div className="panel-heading">
             <span>Incoming Reports</span>
@@ -1315,7 +1298,8 @@ function App() {
           </div>
         </section>
       )}
-    </main>
+      </main>
+    </>
   );
 }
 
