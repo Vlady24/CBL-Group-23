@@ -208,6 +208,24 @@ class PatrolSimulation:
         async def on_dispatch_alert(data):
             await self._handle_dispatch_alert(data)
 
+        @self.sio.on("assign_patrol_route")
+        async def on_assign_patrol_route(data):
+            car_id = data.get("car_id", "")
+            route = data.get("route", [])
+            
+            sim_car_id = car_id.replace(" ", "_")
+            
+            if sim_car_id in self.officers and route:
+                print(f"[SIM] Routing {sim_car_id} on newly assigned patrol path!")
+                officer = self.officers[sim_car_id]
+                
+                # overwrite their old route and tell them to start driving it
+                officer.patrol_route = route
+                officer.patrol_index = 0
+                officer.state = OfficerState.PATROLLING
+            else:
+                print(f"[SIM] Failed to route: Could not find {sim_car_id} or route was empty.")
+
         @self.sio.on("connect")
         async def on_connect():
             print(f"[SIM] Connected to server at {SERVER_URL}")
@@ -420,10 +438,18 @@ class PatrolSimulation:
 
     async def _emit_location(self, officer: Officer):
         """Emit GPS ping — consumed by main.py's update_location handler."""
+        
+        dashboard_status = "available"
+        if officer.state in (OfficerState.PATROLLING, OfficerState.CLUSTER_FIXED):
+            dashboard_status = "patrolling"
+        elif officer.state == OfficerState.RESPONDING:
+            dashboard_status = "responding"
+
         await self.sio.emit("update_location", {
             "car_id": officer.car_id,
             "lat":    round(officer.lat, 6),
             "lng":    round(officer.lng, 6),
+            "status": dashboard_status 
         })
 
     async def _emit_state(self, officer: Officer):

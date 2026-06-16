@@ -300,6 +300,8 @@ function App() {
   const [mapFocusTarget, setMapFocusTarget] = useState<MapFocusTarget | null>(null);
   const [newReportNoticeId, setNewReportNoticeId] = useState<string | null>(null);
   const [policeGeoJson, setPoliceGeoJson] = useState<PoliceFeatureCollection | null>(null);
+  const [showPatrolAssignMenu, setShowPatrolAssignMenu] = useState(false);
+  const [patrolAssignOfficerId, setPatrolAssignOfficerId] = useState("");
   const fleetRef = useRef<FleetUnit[]>(initialFleet);
   const emergencyRouteProgressRef = useRef<Record<string, RouteProgress>>({});
   const patrolRouteProgressRef = useRef<Record<string, RouteProgress>>({});
@@ -555,9 +557,9 @@ function App() {
         if (car.status === "patrolling") {
           const routeProgress = patrolRouteProgressRef.current[car.id];
 
+         
           if (!routeProgress || routeProgress.route.length === 0) {
-            requestPatrolRouteForCar(car, selectedFeature, kMeansZones, patrolRouteProgressRef, pendingPatrolRouteRequestsRef);
-            return car;
+            return car; 
           }
 
           if ((routeProgress.dwellTicksRemaining || 0) > 0) {
@@ -570,14 +572,7 @@ function App() {
 
           if (routeProgress.route.length < 2) {
             delete patrolRouteProgressRef.current[car.id];
-            requestPatrolRouteForCar(
-              car,
-              selectedFeature,
-              kMeansZones,
-              patrolRouteProgressRef,
-              pendingPatrolRouteRequestsRef,
-            );
-            return car;
+            return car; // Leave it alone if the route runs out
           }
 
           const nextIndex = Math.min(
@@ -610,7 +605,7 @@ function App() {
 
       fleetRef.current = nextFleet;
       setFleet(nextFleet);
-      emitFleetLocations(nextFleet);
+      // emitFleetLocations(nextFleet);
     }, FLEET_SIMULATION_INTERVAL_MS);
 
     return () => window.clearInterval(intervalId);
@@ -653,12 +648,13 @@ function App() {
     }));
   }
 
-  async function showPatrolRoutes() {
-    const startCar = fleet.find((car) => car.status === "available" || car.status === "patrolling") || fleet[0];
+  async function generateAndAssignPatrolRoute() {
+    const searchId = patrolAssignOfficerId.trim().toLowerCase().replace("car ", "");
+    const startCar = fleet.find((car) => car.id.toLowerCase().includes(searchId));
     const databaseForceName = databasePoliceForceNames[selectedForce] || selectedForce;
 
     if (!selectedForce || !startCar) {
-      setPatrolRouteError("Select a police force and make sure at least one car is active.");
+      setPatrolRouteError(`Officer ID "${patrolAssignOfficerId || "empty"}" not found in the active fleet.`);
       return;
     }
 
@@ -700,8 +696,12 @@ function App() {
         throw new Error(result.message || "Patrol route request failed");
       }
 
+      const masterLoop = result.route_data.master_patrol_loop;
+      const roadRoute = result.route_data.road_route && result.route_data.road_route.length > 0
+        ? result.route_data.road_route : masterLoop;
+
       setPatrolRoute(
-        result.route_data.master_patrol_loop.map((node) => ({
+        masterLoop.map((node) => ({
           lat: Number(node.lat),
           lng: Number(node.lng),
           name: node.name,
@@ -709,7 +709,7 @@ function App() {
         })),
       );
       setPatrolRoadRoute(
-        (result.route_data.road_route || result.route_data.master_patrol_loop).map((point) => ({
+        roadRoute.map((point) => ({
           lat: Number(point.lat),
           lng: Number(point.lng),
         })),
@@ -717,6 +717,15 @@ function App() {
       setPatrolRouteMinutes(result.route_data.total_route_time_minutes);
       setIsPatrolRouteGenerated(true);
       setLayers((current) => ({ ...current, patrolRoute: true }));
+
+      socket.emit("assign_patrol_route", {
+        car_id : startCar.id,
+        route : roadRoute
+      });
+
+      setShowPatrolAssignMenu(false);
+      setPatrolAssignOfficerId("");
+
     } catch (error) {
       setPatrolRoute([]);
       setPatrolRoadRoute([]);
@@ -1109,7 +1118,7 @@ function App() {
               <span>Daily Patrol Route</span>
             </div>
             <div className="control-grid">
-              <button className="secondary-action small-action" onClick={showPatrolRoutes} disabled={isPatrolRouteLoading}>
+              <button className="secondary-action small-action" onClick={() => setShowPatrolAssignMenu(true)} disabled={isPatrolRouteLoading}>
                 {isPatrolRouteLoading ? "Generating..." : "Generate Patrol Route"}
               </button>
             </div>
@@ -1298,6 +1307,42 @@ function App() {
           </div>
         </section>
       )}
+
+      {showPatrolAssignMenu && (
+          <section className="modal-backdrop" role="dialog" aria-modal="true">
+            <div className="details-modal" style={{ maxWidth: "400px" }}>
+              <header className="report-header">
+                <strong>Assign Patrol Route</strong>
+              </header>
+              <div className="modal-content" style={{ padding: "0", marginTop: "15px" }}>
+                <label className="field-label" htmlFor="patrol-officer-id" style={{ marginTop: 0 }}>
+                  Enter Officer ID (e.g., 101)
+                </label>
+                <input
+                  id="patrol-officer-id"
+                  type="text"
+                  placeholder="101"
+                  value={patrolAssignOfficerId}
+                  onChange={(e) => setPatrolAssignOfficerId(e.target.value)}
+                />
+                
+                {patrolRouteError && <p className="modal-error">{patrolRouteError}</p>}
+                
+                <div className="modal-actions" style={{ marginTop: "20px" }}>
+                  <button className="secondary-action" onClick={() => {
+                    setShowPatrolAssignMenu(false);
+                    setPatrolRouteError("");
+                  }}>
+                    Cancel
+                  </button>
+                  <button className="primary-action" disabled={isPatrolRouteLoading} onClick={generateAndAssignPatrolRoute}>
+                    {isPatrolRouteLoading ? "Generating..." : "Send"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </section>
+        )}
       </main>
     </>
   );

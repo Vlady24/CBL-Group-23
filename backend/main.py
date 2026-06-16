@@ -294,6 +294,12 @@ async def handle_emergency(sid, data):
                        "crime_type" : crime_type
                    })
 
+@sio.on('assign_patrol_route')
+async def handle_assign_patrol(sid, data):
+    print(f"[SERVER] Dispatcher manually assigned patrol route to {data.get('car_id')}. Broadcasting")
+    
+    await sio.emit('assign_patrol_route', data)
+
 @sio.on('disconnect')
 async def disconnect(sid):
     print(f"Client disconnected: {sid}")
