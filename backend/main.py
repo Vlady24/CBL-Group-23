@@ -45,13 +45,7 @@ live_police_fleet = {
     "Car 105": (52.4640, -1.9460)
 }
 
-fleet_status = {
-    "Car 101": "available",
-    "Car 102": "responding",
-    "Car 103": "patrolling",
-    "Car 104": "scene",
-    "Car 105": "patrolling",
-}
+fleet_status = {}
 
 def normalize_car_id(car_id):
     return str(car_id).replace("_", " ")
@@ -241,7 +235,7 @@ async def update_car_location(sid, data):
         # update car's coordinates in server's memory
         live_police_fleet[car_id] = (lat, lng)
         fleet_status.setdefault(car_id, "available")
-        if status in {"available", "patrolling", "responding", "scene"}:
+        if status in {"available", "patrolling", "cluster_fixed", "responding", "scene"}:
             fleet_status[car_id] = status
         print(f"GPS Update: {car_id} moved to ({lat}, {lng})")
 
@@ -269,7 +263,7 @@ async def replace_fleet(sid, data):
             continue
 
         live_police_fleet[car_id] = (lat, lng)
-        fleet_status[car_id] = status if status in {"available", "patrolling", "responding", "scene"} else "available"
+        fleet_status[car_id] = status if status in {"available", "patrolling", "cluster_fixed", "responding", "scene"} else "available"
 
     await sio.emit('fleet_update', live_police_fleet)
     await sio.emit("fleet_status_update", fleet_status_payload())

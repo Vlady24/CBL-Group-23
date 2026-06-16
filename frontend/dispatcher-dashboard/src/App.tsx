@@ -17,7 +17,7 @@ type FleetUnit = {
   id: string;
   state: string;
   area: string;
-  status: "available" | "responding" | "patrolling" | "scene";
+  status: "available" | "responding" | "patrolling" | "cluster_fixed" | "scene";
   position: { lat: number; lng: number };
 };
  
@@ -210,7 +210,7 @@ const initialFleet: FleetUnit[] = [
   },
   {
     id: "Car 102",
-    state: "State 3: Responding",
+    state: "State 4: Responding",
     area: "East sector",
     status: "responding",
     position: { lat: 52.505, lng: -1.835 },
@@ -267,8 +267,9 @@ const clusterColors: Record<number, string> = {
 const fleetStateLabels: Record<FleetUnit["status"], string> = {
   available: "State 1: Available",
   patrolling: "State 2: Patrolling",
-  responding: "State 3: Responding",
-  scene: "State 4: At scene",
+  cluster_fixed: "State 3: Cluster-fixed patrol",
+  responding: "State 4: Responding",
+  scene: "State 5: At scene",
 };
 
 function App() {
@@ -2090,6 +2091,7 @@ function circleIcon(status: FleetUnit["status"]) {
     available: "#2563eb",
     responding: "#f97316",
     patrolling: "#0891b2",
+    cluster_fixed: "#7b3beb",
     scene: "#16a34a",
   };
 

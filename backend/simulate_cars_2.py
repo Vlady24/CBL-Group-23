@@ -32,8 +32,8 @@ GPS_TICK_SECONDS    = 2       # how often each car emits its position
 MOVEMENT_STEP       = 0.0008  # degrees per tick when moving (~70 m)
 CLUSTER_ORBIT_RADIUS = 0.004  # degrees radius for cluster_fixed orbit
 AT_STATION_COOLDOWN = 20      # ticks at station before resuming patrol
-CLUSTER_FIXED_FRACTION = 0.3  # ~30 % of officers are pinned to cluster zones
-NUMBER_OF_OFFICERS  = 7       # total officers spawned
+CLUSTER_FIXED_FRACTION = 0.2  # ~20 % of officers are pinned to cluster 
+STATION_FIXED_FRACTION = 0.1  # ~10 % of officers are pinned to station
 
 # Police force names must match the `reported_by` column in the crimes table
 CITY_CONFIGS = {
@@ -65,6 +65,8 @@ class OfficerState(str, Enum):
     PATROLLING    = "patrolling"
     CLUSTER_FIXED = "cluster_fixed"
     RESPONDING    = "responding"
+    AVAILABLE     = "available"
+    AT_SCENE      = "at_scene"
     AT_STATION    = "at_station"
 
 # Officer dataclass
@@ -74,6 +76,7 @@ class Officer:
     lat: float
     lng: float
     state: OfficerState = OfficerState.PATROLLING
+    home_state: OfficerState = OfficerState.PATROLLING
 
     # Cluster assignment
     cluster_id: int = 0
@@ -106,7 +109,7 @@ class Officer:
 # Columns used: lsoa_code, lsoa_name, latitude, longitude, cluster
 _CSV_PATH = os.path.join(_BACKEND_DIR, "database", "LSOA_features_with_clusters.csv")
 
-def load_clusters_from_csv(csv_path: str = _CSV_PATH) -> dict:
+def load_clusters_from_csv(police_force: str, csv_path: str = _CSV_PATH) -> dict:
     """
     Reads the saved K-means CSV and returns:
         {cluster_id: {"centroid": {"lat": float, "lng": float}, "lsoas": [...]}}
@@ -126,6 +129,8 @@ def load_clusters_from_csv(csv_path: str = _CSV_PATH) -> dict:
     with open(csv_path, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:
+            if row.get("reported_by") != police_force:
+                continue
             if not row.get("latitude") or not row.get("longitude") or not row.get("cluster"):
                 continue
             cid = int(float(row["cluster"]))
@@ -139,6 +144,7 @@ def load_clusters_from_csv(csv_path: str = _CSV_PATH) -> dict:
                 "latitude":  float(row["latitude"]),
                 "longitude": float(row["longitude"]),
                 "cluster":   cid,
+                "reported_by": row.get("reported_by", "")
             })
 
     if not clusters:
@@ -244,24 +250,38 @@ class PatrolSimulation:
             {cluster_id: {"centroid": {lat, lng}, "lsoas": [...]}}
         """
         cluster_ids = sorted(clusters.keys())
-        n_fixed = max(1, round(NUMBER_OF_OFFICERS * CLUSTER_FIXED_FRACTION))
 
-        for i in range(NUMBER_OF_OFFICERS):
+        n_station = max(1, round(self.number_of_officers * STATION_FIXED_FRACTION))
+        n_fixed = max(1, round(self.number_of_officers * CLUSTER_FIXED_FRACTION))
+
+        for i in range(self.number_of_officers):
             car_id = f"Car_{101 + i}"
             cid    = cluster_ids[i % len(cluster_ids)]
             centroid = clusters[cid]["centroid"]
 
             # Spawn officer at their cluster centroid with a small random offset
-            lat = centroid["lat"] + random.uniform(-0.005, 0.005)
-            lng = centroid["lng"] + random.uniform(-0.005, 0.005)
+            if i < n_station:
+                state = OfficerState.AVAILABLE
+            elif i < (n_station + n_fixed):
+                state = OfficerState.CLUSTER_FIXED
+            else:
+                state = OfficerState.PATROLLING
 
-            state = OfficerState.CLUSTER_FIXED if i < n_fixed else OfficerState.PATROLLING
+            if state == OfficerState.AVAILABLE:
+                lat = self.station["lat"]
+                lng = self.station["lng"]
+            else:
+                spawn_lsoa = random.choice(clusters[cid]["lsoas"])
+                lat = spawn_lsoa["latitude"] + random.uniform(-0.0005, 0.0005)
+                lng = spawn_lsoa["longitude"] + random.uniform(-0.0005, 0.0005)
+
 
             officer = Officer(
                 car_id=car_id,
                 lat=lat,
                 lng=lng,
                 state=state,
+                home_state=state,
                 cluster_id=cid,
                 cluster_centroid=centroid,
                 orbit_angle=random.uniform(0, 2 * math.pi),
@@ -289,7 +309,13 @@ class PatrolSimulation:
 
         n_patrolling = sum(1 for o in self.officers.values() if o.state == OfficerState.PATROLLING)
         n_fixed_actual = sum(1 for o in self.officers.values() if o.state == OfficerState.CLUSTER_FIXED)
-        print(f"\n[SIM] Fleet ready: {n_patrolling} patrolling, {n_fixed_actual} cluster_fixed.")
+
+        for officer in self.officers.values():
+            print(
+            officer.car_id,
+            officer.state
+        )
+        print(f"\n[SIM] Fleet ready: {n_patrolling} patrolling, {n_fixed_actual} cluster_fixed and {n_station} available at station.\n")
 
     # Movement helpers
     
@@ -370,9 +396,10 @@ class PatrolSimulation:
         """Count down cooldown, then resume patrol."""
         officer.station_ticks_remaining -= 1
         if officer.station_ticks_remaining <= 0:
-            print(f"[SIM] {officer.car_id} leaving station, resuming patrol.")
-            officer.state         = OfficerState.PATROLLING
-            officer.patrol_index  = 0
+            print(f"[SIM] {officer.car_id} leaving station,"f"returning to {officer.home_state.value}.")
+            officer.state = officer.home_state
+            if officer.home_state == OfficerState.PATROLLING:
+                officer.patrol_index = 0
 
     # Dispatch handler — calls the real Reversed Dijkstra
 
@@ -383,14 +410,19 @@ class PatrolSimulation:
         2. Call reversed_djikstra.find_nearest_officers() for a real traffic route.
         3. Assign the chosen officer and store their road polyline.
         """
+        print("\n[SIM] RAW DISPATCH DATA:")
+        print(data)
+
         inc_lat = float(data.get("lat", 0))
         inc_lng = float(data.get("lng", 0))
         inc_id  = data.get("incident_id") or data.get("crime_type", "SOS")
 
+        requested_officers = int(data.get("officers_required", 1))
+
         candidates = {
             o.car_id: (o.lat, o.lng)
             for o in self.officers.values()
-            if o.state in (OfficerState.PATROLLING, OfficerState.CLUSTER_FIXED)
+            if o.state in (OfficerState.PATROLLING, OfficerState.CLUSTER_FIXED, OfficerState.AVAILABLE)
         }
 
         if not candidates:
@@ -398,40 +430,64 @@ class PatrolSimulation:
             return
 
         print(f"[SIM] Incident '{inc_id}' at ({inc_lat:.4f},{inc_lng:.4f}). "
-              f"Calling Reversed Dijkstra with {len(candidates)} candidates ...")
+              f"Calling Reversed Dijkstra with {len(candidates)} candidates, for {requested_officers} officers...")
 
         try:
             if not DIJKSTRA_AVAILABLE:
                 raise RuntimeError("reversed_djikstra not loaded (missing API key)")
-            assignments = _reversed_djikstra_module.find_nearest_officers(
-                no_officers=1,
+            assignments = (_reversed_djikstra_module.find_nearest_officers(
+                no_officers=min(requested_officers, len(candidates)),
                 officers=candidates,
                 dest=(inc_lat, inc_lng),
             )
-            assignment  = assignments[0]
-            car_id      = assignment["officer_id"]
-            road_route  = assignment["route"]   # list of (lat, lng) tuples from polyline.decode
-            duration_s  = assignment["traffic_duration_s"]
-
-            print(f"[SIM] Dijkstra assigned {car_id} — ETA {duration_s}s, "
-                  f"{len(road_route)} route points.")
+        )
+            
+            print(
+                f"[SIM] Dijkstra returned "
+                f"{len(assignments)} assignments."
+            )
 
         except Exception as exc:
-            # Google Maps unavailable — pick nearest officer by straight-line distance
-            print(f"[SIM] Reversed Dijkstra failed ({exc}). Falling back to nearest-euclidean.")
-            car_id     = min(candidates, key=lambda cid: math.hypot(
-                candidates[cid][0] - inc_lat, candidates[cid][1] - inc_lng))
-            road_route = []
+            print(
+            f"[SIM] Reversed Dijkstra failed ({exc}). "
+            f"Falling back to nearest-euclidean.")
+        
+            sorted_candidates = sorted(
+                candidates.items(),
+                key=lambda item: math.hypot(
+                    item[1][0] - inc_lat,
+                    item[1][1] - inc_lng
+                )
+            )
 
-        officer = self.officers[car_id]
-        officer.state          = OfficerState.RESPONDING
-        officer.incident_lat   = inc_lat
-        officer.incident_lng   = inc_lng
-        officer.incident_id    = inc_id
-        officer.response_route = road_route   # list of (lat, lng) tuples
-        officer.response_index = 0
+            assignments = []
 
-        print(f"[SIM] {car_id} dispatched to '{inc_id}'.")
+            for car_id, _ in sorted_candidates[:requested_officers]:
+                assignments.append({
+                    "officer_id": car_id,
+                    "route": [],
+                    "traffic_duration_s": 0
+                })
+        for assignment in assignments:
+    
+            car_id = assignment["officer_id"]
+            road_route = assignment["route"]
+
+            officer = self.officers[car_id]
+
+            officer.state = OfficerState.RESPONDING
+            officer.incident_lat = inc_lat
+            officer.incident_lng = inc_lng
+            officer.incident_id = inc_id
+            officer.response_route = road_route
+            officer.response_index = 0
+
+            duration_s = assignment.get(
+            "traffic_duration_s",
+            0
+        )
+
+        print(f'[SIM] {car_id} dispatched to \'{inc_id}\'. ETA {duration_s / 60:.1f} min.')
         await self._emit_state(officer)
 
     # Emitters
@@ -440,8 +496,10 @@ class PatrolSimulation:
         """Emit GPS ping — consumed by main.py's update_location handler."""
         
         dashboard_status = "available"
-        if officer.state in (OfficerState.PATROLLING, OfficerState.CLUSTER_FIXED):
+        if officer.state == OfficerState.PATROLLING:
             dashboard_status = "patrolling"
+        elif officer.state == OfficerState.CLUSTER_FIXED:
+            dashboard_status = "cluster_fixed"
         elif officer.state == OfficerState.RESPONDING:
             dashboard_status = "responding"
 
@@ -497,6 +555,8 @@ class PatrolSimulation:
                 self._advance_response(officer)
             elif officer.state == OfficerState.AT_STATION:
                 self._advance_station(officer)
+            elif officer.state == OfficerState.AVAILABLE:
+                pass
 
             await self._emit_location(officer)
             await self._emit_state(officer)
@@ -504,12 +564,21 @@ class PatrolSimulation:
     # Entry point
 
     async def run(self):
+        while True:
+            try:
+                officer_count = int(input("Number of officers to simulate: "))
+                if officer_count > 0:
+                    break
+            except ValueError:
+                print("Please enter a valid number.")
+        self.number_of_officers = officer_count
+
         print(f"\n[SIM] Loading cluster assignments from CSV ...")
-        clusters = load_clusters_from_csv()
+        clusters = load_clusters_from_csv(police_force=self.police_force)
         total_lsoas = sum(len(c["lsoas"]) for c in clusters.values())
         print(f"[SIM] Loaded {len(clusters)} clusters, {total_lsoas} LSOAs from CSV.")
 
-        print(f"\n[SIM] Initialising fleet ({NUMBER_OF_OFFICERS} officers) ...")
+        print(f"\n[SIM] Initialising fleet ({self.number_of_officers} officers) ...")
         self.initialise_fleet(clusters)
 
         print(f"\n[SIM] Connecting to server at {SERVER_URL} ...")

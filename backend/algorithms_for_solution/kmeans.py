@@ -32,7 +32,7 @@ def run_kmeans(n_clusters=4):
         
         conn = sqlite3.connect(str(_DB_PATH))
 
-        df = pd.read_sql_query("""select c.lsoa_code, c.lsoa_name, c.month, c.crime_type, c.latitude, c.longitude, p.population
+        df = pd.read_sql_query("""select c.lsoa_code, c.lsoa_name, c.month, c.crime_type, c.latitude, c.longitude, c.reported_by, p.population
                             from crimes c
                             join population p
                             on c.lsoa_code = p.lsoa_code
@@ -59,7 +59,7 @@ def run_kmeans(n_clusters=4):
 
     # create a table with one row per lsoa
     base = df.groupby("lsoa_code", as_index = False).agg(lsoa_name = ("lsoa_name", "first"),
-        population = ("population", "first"), latitude = ("latitude", "mean"), longitude = ("longitude", "mean"))
+        population = ("population", "first"), latitude = ("latitude", "mean"), longitude = ("longitude", "mean"), reported_by=("reported_by", "first"))
 
     # feaures for clustering
     mcount = df.groupby(["lsoa_code", "month"]).size().reset_index(name= "monthly_crime_count")
