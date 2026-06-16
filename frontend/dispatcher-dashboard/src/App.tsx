@@ -1755,6 +1755,14 @@ function findPoliceForceForPoint(lat: number, lng: number, policeGeoJson: Police
   return matchingFeature?.properties.PFA23NM || "";
 }
 
+// Central police station locations matching simulate_cars_2.py configurations
+const regionalPoliceStations: Record<string, { lat: number; lng: number }> = {
+  "West Midlands": { lat: 52.4831, lng: -1.8966 },
+  "Metropolitan Police": { lat: 51.5074, lng: -0.1278 },
+  "Merseyside": { lat: 53.4084, lng: -2.9916 },
+  "West Yorkshire": { lat: 53.8008, lng: -1.5491 },
+};
+
 function createFleetSimulation(
   carCount: number,
   selectedForce: string,
@@ -1776,9 +1784,23 @@ function createFleetSimulation(
     const status = preferredStatus && preferredStatus !== "responding"
       ? preferredStatus
       : randomSimulationStatus();
-    let position = status === "patrolling"
-      ? choosePatrolHotspot(selectedFeature, kMeansZones)
-      : randomPointInFeature(selectedFeature);
+    let position;
+    if (status == "patrolling") {
+      position = choosePatrolHotspot(selectedFeature, kMeansZones);
+    } else if (status == "available") {
+      // find the specific station for the selected force region
+      const station = regionalPoliceStations[selectedForce] || {
+        lat : Number(selectedFeature.properties.LAT) || 52.4862,
+        lng : Number(selectedFeature.properties.LONG) || -1.8904,
+      };
+      // offset such that the cars do not stack on the map
+      position = {
+        lat : station.lat + (Math.random() - 0.5) * 0.0004,
+        lng : station.lng + (Math.random() - 0.5) * 0.0004,
+      };
+    } else {
+      position = randomPointInFeature(selectedFeature);
+    }
 
     if (status === "scene") {
       let sceneGroup = sceneGroups.find((group) => group.assigned < group.capacity);
