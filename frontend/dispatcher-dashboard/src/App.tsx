@@ -111,6 +111,7 @@ type RouteProgress = {
   route: { lat: number; lng: number }[];
   index: number;
   dwellTicksRemaining?: number;
+  loop?: boolean;
 };
 
 type FleetStatusUpdate = Record<
@@ -560,6 +561,13 @@ function App() {
 
          
           if (!routeProgress || routeProgress.route.length === 0) {
+            requestPatrolRouteForCar(
+              car,
+              selectedFeature,
+              kMeansZones,
+              patrolRouteProgressRef,
+              pendingPatrolRouteRequestsRef,
+            );
             return car; 
           }
 
@@ -573,7 +581,14 @@ function App() {
 
           if (routeProgress.route.length < 2) {
             delete patrolRouteProgressRef.current[car.id];
-            return car; // Leave it alone if the route runs out
+            requestPatrolRouteForCar(
+              car,
+              selectedFeature,
+              kMeansZones,
+              patrolRouteProgressRef,
+              pendingPatrolRouteRequestsRef,
+            );
+            return car;
           }
 
           const nextIndex = Math.min(
@@ -583,11 +598,18 @@ function App() {
           const nextPosition = routeProgress.route[nextIndex];
 
           if (nextIndex >= routeProgress.route.length - 1) {
-            patrolRouteProgressRef.current[car.id] = {
-              route: [nextPosition],
-              index: 0,
-              dwellTicksRemaining: PATROL_HOTSPOT_DWELL_TICKS,
-            };
+            if (routeProgress.loop) {
+              patrolRouteProgressRef.current[car.id] = {
+                ...routeProgress,
+                index: 0,
+              };
+            } else {
+              patrolRouteProgressRef.current[car.id] = {
+                route: [nextPosition],
+                index: 0,
+                dwellTicksRemaining: PATROL_HOTSPOT_DWELL_TICKS,
+              };
+            }
           } else {
             patrolRouteProgressRef.current[car.id] = {
               ...routeProgress,
@@ -606,7 +628,7 @@ function App() {
 
       fleetRef.current = nextFleet;
       setFleet(nextFleet);
-      // emitFleetLocations(nextFleet);
+      emitFleetLocations(nextFleet);
     }, FLEET_SIMULATION_INTERVAL_MS);
 
     return () => window.clearInterval(intervalId);
@@ -647,6 +669,82 @@ function App() {
       ...current,
       [layer]: !current[layer],
     }));
+  }
+
+  function assignCarToGeneratedPatrolRoute(
+    car: FleetUnit,
+    route: { lat: number; lng: number }[],
+  ) {
+    const cleanedRoute = route
+      .map((point) => ({ lat: Number(point.lat), lng: Number(point.lng) }))
+      .filter((point) => Number.isFinite(point.lat) && Number.isFinite(point.lng));
+
+    if (cleanedRoute.length < 2) {
+      return;
+    }
+
+    const closestIndex = closestRoutePointIndex(car.position, cleanedRoute);
+    const patrolLoop = [
+      ...cleanedRoute.slice(closestIndex),
+      ...cleanedRoute.slice(0, closestIndex + 1),
+    ];
+
+    const setAssignedPatrolRoute = (connectorRoute: { lat: number; lng: number }[] = []) => {
+      patrolRouteProgressRef.current[car.id] = {
+        route: [...connectorRoute, ...patrolLoop].filter(
+          (point, index, points) =>
+            index === 0 ||
+            point.lat !== points[index - 1].lat ||
+            point.lng !== points[index - 1].lng,
+        ),
+        index: 0,
+        loop: true,
+      };
+
+      delete emergencyRouteProgressRef.current[car.id];
+      pendingPatrolRouteRequestsRef.current.delete(car.id);
+
+      const nextFleet = fleetRef.current.map((fleetCar) =>
+        fleetCar.id === car.id
+          ? {
+              ...fleetCar,
+              state: fleetStateLabels.patrolling,
+              status: "patrolling" as const,
+            }
+          : fleetCar,
+      );
+
+      fleetRef.current = nextFleet;
+      setFleet(nextFleet);
+      emitFleetLocations(nextFleet);
+    };
+
+    if (!window.google?.maps) {
+      setAssignedPatrolRoute();
+      return;
+    }
+
+    const service = new window.google.maps.DirectionsService();
+    service.route(
+      {
+        origin: car.position,
+        destination: patrolLoop[0],
+        travelMode: window.google.maps.TravelMode.DRIVING,
+      },
+      (result: any, status: string) => {
+        if (status !== "OK" || !result?.routes?.[0]?.overview_path?.length) {
+          setAssignedPatrolRoute();
+          return;
+        }
+
+        setAssignedPatrolRoute(
+          result.routes[0].overview_path.map((point: any) => ({
+            lat: point.lat(),
+            lng: point.lng(),
+          })),
+        );
+      },
+    );
   }
 
   async function generateAndAssignPatrolRoute() {
@@ -718,6 +816,7 @@ function App() {
       setPatrolRouteMinutes(result.route_data.total_route_time_minutes);
       setIsPatrolRouteGenerated(true);
       setLayers((current) => ({ ...current, patrolRoute: true }));
+      assignCarToGeneratedPatrolRoute(startCar, roadRoute);
 
       socket.emit("assign_patrol_route", {
         car_id : startCar.id,
@@ -1885,6 +1984,27 @@ function choosePatrolHotspot(selectedFeature: PoliceFeature, kMeansZones: KMeans
   );
 }
 
+function closestRoutePointIndex(
+  position: { lat: number; lng: number },
+  route: { lat: number; lng: number }[],
+) {
+  let closestIndex = 0;
+  let closestDistance = Number.POSITIVE_INFINITY;
+
+  route.forEach((point, index) => {
+    const distance =
+      (position.lat - point.lat) ** 2 +
+      (position.lng - point.lng) ** 2;
+
+    if (distance < closestDistance) {
+      closestDistance = distance;
+      closestIndex = index;
+    }
+  });
+
+  return closestIndex;
+}
+
 function jitterPointInsideFeature(point: { lat: number; lng: number }, selectedFeature: PoliceFeature) {
   for (let attempt = 0; attempt < 20; attempt += 1) {
     const jittered = {
@@ -1947,6 +2067,10 @@ function requestPatrolRouteForCar(
       pendingRequestsRef.current.delete(car.id);
 
       if (status !== "OK" || !result?.routes?.[0]?.overview_path?.length) {
+        return;
+      }
+
+      if (patrolRouteProgressRef.current[car.id]?.loop) {
         return;
       }
 
