@@ -210,7 +210,7 @@ class PatrolSimulation:
 
     def _register_handlers(self):
 
-        @self.sio.on("dispatch_alert")
+        @self.sio.on("dispatch_officers")
         async def on_dispatch_alert(data):
             await self._handle_dispatch_alert(data)
 

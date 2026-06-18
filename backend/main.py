@@ -172,6 +172,20 @@ async def deploy_nearest_officers(data : EmergencyTrigger):
             dest=(data.lat, data.lng)
         )
 
+        await sio.emit(
+            "dispatch_officers",
+            {
+                "incident_id": data.incident_id,
+                "lat": data.lat,
+                "lng": data.lng,
+                "officers_required": data.officers_needed,
+            })
+        
+        print(f"Dijkstra returned {len(assignments)} assignments:")
+
+        for a in assignments:
+            print(a["officer_id"], "ETA:", a["traffic_duration_s"])
+
         assigned_officers = []
 
         for assignment in assignments:
@@ -277,8 +291,7 @@ async def handle_emergency(sid, data):
 
     citizen_details = data.get('details') or data.get('description') or "No specific details typed by citizen."
     crime_type = data.get('crime_type') or "Citizen SOS Emergency"
-
-    # notify the dispatcher dashboard
+    #notify the dispatcher dashboard
     await sio.emit('dispatch_alert',
                    {
                        "lat" : data['lat'],
@@ -286,7 +299,7 @@ async def handle_emergency(sid, data):
                        "message" : "Citizen emergency reported!",
                        "details" : citizen_details,
                        "crime_type" : crime_type
-                   })
+                    })
 
 @sio.on('assign_patrol_route')
 async def handle_assign_patrol(sid, data):
