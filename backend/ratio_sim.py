@@ -2,7 +2,7 @@ import sqlite3
 import pandas as pd
 import numpy as np
 from math import radians, sin, cos, sqrt, atan2
-from datetime import datetime
+from datetime import datetime, time
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from pathlib import Path
@@ -32,7 +32,7 @@ RANDOM_SEED = 42
 N_TSP_STOPS = 15
 SHIFT_HOURS = 8
 N_SIMULATIONS = 10   # how many shifts to simulate per ratio, increase for more robust results but longer runtime
-MAX_RESPONSE_MINUTES = 10  # acceptable response time threshold in minutes
+MAX_RESPONSE_MINUTES = 15  # acceptable response time threshold in minutes
 
 def get_force_capacity(force_name): # more realistic simulation based on actual staffing levels of the chosen force
     """
@@ -67,11 +67,12 @@ def estimate_events_per_hour(lsoa_coords): # more realistic event generation bas
     return emergency_events_per_day / 24
 
 # Ratios to test: (patrol_fraction, station_fraction)
-RATIOS = [
-    (0.50, 0.50),
-    (0.60, 0.40),
-    (0.70, 0.30),
-    (0.80, 0.20),
+DEPLOYMENTS = [
+    ("100% Patrol", 0.0, 0.0, 1.0),
+    ("10/10/80", 0.1, 0.1, 0.8),
+    ("20/10/70", 0.2, 0.1, 0.7),
+    ("10/20/70", 0.1, 0.2, 0.7),
+    ("30/10/60", 0.3, 0.1, 0.6),
 ]
 
 # Haversine 
@@ -217,22 +218,70 @@ def simulate_officers(lsoa_coords, n, seed=RANDOM_SEED):
     )
     return sampled[['officer_id', 'latitude', 'longitude', 'role']].copy()
 
-# STEP 5: Split officers into partol and station 
-def split_officers(officers, patrol_fraction, seed=RANDOM_SEED):
-    """
-    Splits officers into patrol and station groups based on the ratio.
-    Response officers are prioritised for station duty since they
-    are needed for emergency dispatch.
-    """
-    np.random.seed(seed)
-    n_patrol  = int(len(officers) * patrol_fraction)
+#Step 5: Split officers into patrol, custer fixed and station
+def build_deployment(
+    officers,
+    lsoa_coords,
+    station_location,
+    station_ratio,
+    cluster_ratio,
+    patrol_ratio,
+    seed=RANDOM_SEED
+):
 
-    # Shuffle and split
-    shuffled  = officers.sample(frac=1, random_state=seed).reset_index(drop=True)
-    patrol    = shuffled.iloc[:n_patrol].copy()
-    station   = shuffled.iloc[n_patrol:].copy()
+    shuffled = officers.sample(
+        frac=1,
+        random_state=seed
+    ).reset_index(drop=True)
 
-    return patrol, station
+    n_total = len(shuffled)
+
+    n_station = round(n_total * station_ratio)
+    n_cluster = round(n_total * cluster_ratio)
+    n_patrol = n_total - n_station - n_cluster
+
+    station = shuffled.iloc[:n_station].copy()
+
+    cluster = shuffled.iloc[
+        n_station:n_station+n_cluster
+    ].copy()
+
+    patrol = shuffled.iloc[
+        n_station+n_cluster:
+    ].copy()
+
+    # station officers
+
+    station["latitude"] = station_location["latitude"]
+    station["longitude"] = station_location["longitude"]
+
+    # cluster fixed officers
+
+    cluster_summary = (
+        lsoa_coords.groupby("cluster")
+        .agg(
+            latitude=("latitude", "mean"),
+            longitude=("longitude", "mean"),
+            crime=("crime_count", "sum")
+        )
+        .sort_values("crime", ascending=False)
+    )
+
+    top_clusters = cluster_summary.head(
+        max(1, len(cluster))
+    ).reset_index()
+
+    for i in range(len(cluster)):
+
+        row = top_clusters.iloc[
+            min(i, len(top_clusters)-1)
+        ]
+
+        cluster.iloc[i, cluster.columns.get_loc("latitude")] = row["latitude"]
+
+        cluster.iloc[i, cluster.columns.get_loc("longitude")] = row["longitude"]
+
+    return patrol, cluster, station
 
 # STEP 6: Generate events for one shift 
 def generate_events(event_pool, events_per_hour, shift_hours=SHIFT_HOURS, seed=None):
@@ -332,7 +381,7 @@ def find_nearest_officer(event, available_officers):
         return nearest_idx, travel_time_min
 
 # STEP 8: Simulate one shift
-def simulate_shift(officers, station_officers, event_pool,
+def simulate_shift(patrol_officers, cluster_officers, station_officers, event_pool,
                    events_per_hour, shift_hours=SHIFT_HOURS, seed=None):
     """
     Simulates one full shift.
@@ -341,6 +390,7 @@ def simulate_shift(officers, station_officers, event_pool,
     unavailable for the duration of their response.
     Returns response times and coverage metrics.
     """
+    print(f"Generated {len(events)} events in {time.time()-start:.2f}s")
     events = generate_events(event_pool, events_per_hour=events_per_hour, shift_hours=shift_hours, seed=seed)
 
     if events.empty:
@@ -354,11 +404,13 @@ def simulate_shift(officers, station_officers, event_pool,
         }
 
     # Track availability — officers start fully available
-    available = pd.concat([officers, station_officers], ignore_index=True)
+    available = pd.concat([patrol_officers, cluster_officers, station_officers], ignore_index=True)
     available['available_at'] = 0.0
 
     response_times  = []
     unresponded     = 0
+
+    start = time.time()
 
     for _, event in events.iterrows():
         current_time = event['time_hours']
@@ -414,7 +466,7 @@ def simulate_shift(officers, station_officers, event_pool,
     }
 
 # STEP 9: Run full ratio comparison
-def run_ratio_comparison(officers, station_location, event_pool, events_per_hour,ratios=RATIOS,
+def run_ratio_comparison(officers, lsoa_coords, station_location, event_pool, events_per_hour, deployments=DEPLOYMENTS,
                           n_simulations=N_SIMULATIONS):
     """
     Runs N_SIMULATIONS shifts for each patrol/station ratio.
@@ -422,11 +474,11 @@ def run_ratio_comparison(officers, station_location, event_pool, events_per_hour
     """
     results = []
 
-    for patrol_frac, station_frac in ratios:
+    for deployment_name, station_frac, cluster_frac, patrol_frac in deployments:
         print(f"\nTesting ratio — Patrol: {int(patrol_frac*100)}% | "
               f"Station: {int(station_frac*100)}%")
 
-        patrol, station = split_officers(officers, patrol_frac)
+        patrol, cluster, station = build_deployment(officers, lsoa_coords, station_location, station_frac, cluster_frac, patrol_frac)
         station['latitude']  = station_location['latitude']
         station['longitude'] = station_location['longitude']
 
@@ -437,15 +489,17 @@ def run_ratio_comparison(officers, station_location, event_pool, events_per_hour
         shift_results = []
         for sim in range(n_simulations):
             result = simulate_shift(
-                patrol, station, event_pool, events_per_hour, seed=RANDOM_SEED + sim
+                patrol, cluster, station, event_pool, events_per_hour, seed=RANDOM_SEED + sim
             )
             shift_results.append(result)
 
         df_shifts = pd.DataFrame(shift_results)
 
         results.append({
-            'patrol_pct':              int(patrol_frac * 100),
-            'station_pct':             int(station_frac * 100),
+            "deployment": deployment_name,
+            "station_pct": int(station_frac * 100),
+            "cluster_pct": int(cluster_frac * 100),
+            "patrol_pct": int(patrol_frac * 100),
             'n_patrol':                n_patrol,
             'n_station':               n_station,
             'mean_response_time':      df_shifts['mean_response_time'].mean(),
@@ -618,7 +672,7 @@ if __name__ == '__main__':
 
     # Run ratio comparison
     print("\nRunning ratio simulation...")
-    summary = run_ratio_comparison(officers, station, event_pool, events_per_hour)
+    summary = run_ratio_comparison(officers, lsoa_coords, station, event_pool, events_per_hour)
 
     # Output
     print_summary(summary)
