@@ -29,7 +29,7 @@ The system utilizes a 4 GB SQLite database containing 17 million filtered histor
 
 ### 1. Clone the Repository
 Clone this repository to your local machine:
-`git clone https://github.com/YOUR-USERNAME/YOUR-REPO-NAME.git`
+`git clone https://github.com/Vlady24/CBL-Group-23.git`
 
 ### 2. Environment Variables
 Create a `.env` file in the following folders: important_stuff_APIs, frontend/citizen-app, frontend/dispatcher-dashboard, and frontend/officer-dashboard and add your Google Maps API key. The system requires this to calculate road networks and travel times, and to trigger the Euclidean distance fallback if the API fails.
@@ -42,15 +42,15 @@ Navigate to the backend directory, install the required dependencies, and start 
 `python simulate_cars_2.py`
 
 ### 4. Frontend Setup (React)
-Open a new terminal, navigate to the frontend dispatcher-dashboard directory, install dependencies, and start the development server.
-`cd frontend`
-`cd dispatcher-dashboard`
-`npm install`
-`npm run dev`
-
 Open a new terminal, navigate to the frontend citizen-app dashboard directory, install dependencies, and start the development server.
 `cd frontend`
 `cd citizen-app`
+`npm install`
+`npm run dev`
+
+Open a new terminal, navigate to the frontend dispatcher-dashboard directory, install dependencies, and start the development server.
+`cd frontend`
+`cd dispatcher-dashboard`
 `npm install`
 `npm run dev`
 
@@ -59,6 +59,11 @@ Open a new terminal, navigate to the frontend officer-dashboard directory, insta
 `cd officer-dashboard`
 `npm install`
 `npm run dev`
+
+After starting the development servers, navigate to each of the local application endpoints (e.g., http://localhost:5173) in your browser.
+
+### 5. Additional Setup
+In the Dispatcher Dashboard, choose "Metropolitan Police" from the top searchbar.
 
 ## Contributors
 
