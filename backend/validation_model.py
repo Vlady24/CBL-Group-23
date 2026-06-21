@@ -8,7 +8,7 @@ CSV_PATH = "backend/database/lsoa_features_with_clusters.csv"
 FORCE_NAME = "West Midlands Police"
 N_INCIDENTS = 10000
 N_OFFICERS = 20
-AVERAGE_RESPONSE_SPEED_KMH = 50
+AVERAGE_RESPONSE_SPEED_KMH = 55
 RESPONSE_TARGET_MIN = 15
 RANDOM_SEED = 42
 
@@ -23,7 +23,7 @@ def haversine(lat1, lon1, lat2, lon2):
     return 2 * R * atan2(sqrt(a), sqrt(1 - a))
 
 def eta_minutes(distance_km):
-    return (distance_km / AVERAGE_RESPONSE_SPEED_KMH * 60) * 1.8 # road factor in urban areas
+    return (distance_km / AVERAGE_RESPONSE_SPEED_KMH * 60) * 2.2 # road factor in urban areas
 # LOAD DATA
 print("Loading CSV...")
 

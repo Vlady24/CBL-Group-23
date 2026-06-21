@@ -1,3 +1,6 @@
+## This simulation is not used for the report results, since changes were needed after some progress in the project. The simulation in the report are: 
+## Validation_model.py, which is the robust simulation, and sanity_check.py is the simulation that uses google maps and gave the ETA estimation we looked at. 
+
 import sqlite3
 import pandas as pd
 import numpy as np

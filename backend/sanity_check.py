@@ -5,7 +5,7 @@ from math import radians, sin, cos, sqrt, atan2
 
 # Configuration
 
-GOOGLE_API_KEY = "AIzaSyA2LQsntWrhMPXnb4lyej2LyR1Nz5uqMV8"
+GOOGLE_API_KEY = "your key"
 
 CSV_PATH = "backend/database/lsoa_features_with_clusters.csv"
 FORCE_NAME = "West Midlands Police"
@@ -14,7 +14,7 @@ N_INCIDENTS = 120
 N_OFFICERS = 20
 
 AVERAGE_RESPONSE_SPEED_KMH = 55
-ROAD_FACTOR = 1.3
+ROAD_FACTOR = 2.3
 
 RANDOM_SEED = 42
 
@@ -194,4 +194,20 @@ print(
     f"{results.corr().iloc[0,1]:.3f}"
 )
 
-print("\nSaved google_sanity_check.csv")
+print(
+    "Median Haversine ETA:",
+    results["haversine_eta"].median()
+)
+
+print(
+    "Median Google ETA:",
+    results["google_eta"].median()
+)
+
+print(
+    "Median Factor:",
+    (
+        results["google_eta"]
+        / results["haversine_eta"]
+    ).median()
+)
