@@ -35,6 +35,8 @@ Clone this repository to your local machine:
 Create a `.env` file in the following folders: important_stuff_APIs, frontend/citizen-app, frontend/dispatcher-dashboard, and frontend/officer-dashboard and add your Google Maps API key. The system requires this to calculate road networks and travel times, and to trigger the Euclidean distance fallback if the API fails.
 `REACT_APP_GOOGLE_MAPS_API_KEY=your_api_key_here`
 
+Additionally, navigate to https://drive.google.com/file/d/12r54pNKuVM9T6WeScEWKSZvYG_T6LuPf/view?usp=drive_link , download and unzip the file located there, and place it in backend/database.
+
 ### 3. Backend Setup (Python)
 Navigate to the backend directory, install the required dependencies, and start the backend server, and then the car simulation.
 `cd backend`
