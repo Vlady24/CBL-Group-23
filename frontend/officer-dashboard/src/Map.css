@@ -1,0 +1,188 @@
+body {
+  margin: 0;
+  background: #f3f6fb;
+  font-family:
+    Inter,
+    system-ui,
+    sans-serif;
+}
+
+.dashboard {
+  height: 100vh;
+  width: 100%;
+  position: relative;
+  overflow: hidden;
+}
+
+.topbar {
+  position: absolute;
+  top: 20px;
+  left: 20px;
+  right: 20px;
+
+  z-index: 1000;
+
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+
+  padding: 16px 22px;
+
+  background: rgba(255, 255, 255, 0.95);
+
+  backdrop-filter: blur(12px);
+
+  border-radius: 18px;
+
+  box-shadow:
+    0 10px 30px rgba(0, 0, 0, 0.08);
+}
+
+.topbar-title h1 {
+  margin: 0;
+  font-size: 24px;
+  color: #0f172a;
+}
+
+.topbar-title span {
+  font-size: 13px;
+  color: #64748b;
+}
+
+.dispatcher-user {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.dispatcher-user span {
+  width: 42px;
+  height: 42px;
+
+  border-radius: 50%;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  background: #2563eb;
+
+  color: white;
+  font-weight: 700;
+}
+
+.dispatcher-user small {
+  display: block;
+  color: #64748b;
+}
+
+.floating-panel {
+  position: absolute;
+
+  top: 110px;
+  left: 20px;
+
+  width: 300px;
+
+  z-index: 1000;
+
+  background: white;
+
+  border-radius: 18px;
+
+  padding: 20px;
+
+  box-shadow:
+    0 10px 35px rgba(0, 0, 0, 0.08);
+}
+
+.panel-heading {
+  margin-bottom: 15px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.primary-action {
+  width: 100%;
+
+  border: none;
+
+  border-radius: 12px;
+
+  padding: 12px;
+
+  background: #2563eb;
+
+  color: white;
+
+  font-size: 14px;
+  font-weight: 700;
+
+  cursor: pointer;
+
+  transition: 0.2s;
+}
+
+.primary-action:hover {
+  background: #1d4ed8;
+}
+
+.route-summary {
+  margin-top: 15px;
+  color: #334155;
+}
+
+.map-shell {
+  width: 100%;
+  height: 100vh;
+  position: relative;
+}
+
+.map-card {
+  position: absolute;
+
+  top: 110px;
+  right: 20px;
+
+  background: white;
+
+  padding: 14px 18px;
+
+  border-radius: 14px;
+
+  box-shadow:
+    0 10px 25px rgba(0, 0, 0, 0.08);
+
+  z-index: 1000;
+}
+
+.urgent-alert-overlay {
+  position: absolute;
+
+  top: 20px;
+  right: 20px;
+
+  z-index: 9999;
+}
+
+.urgent-alert-box {
+  background: #dc2626;
+  color: white;
+
+  padding: 18px 24px;
+
+  border-radius: 16px;
+
+  box-shadow:
+    0 10px 30px rgba(220, 38, 38, 0.4);
+}
+
+.urgent-alert-box h2 {
+  margin: 0 0 6px;
+  font-size: 18px;
+}
+
+.urgent-alert-box p {
+  margin: 0;
+}

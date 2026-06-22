@@ -22,11 +22,11 @@ function App() {
   // this is done only for the demo purposes to simulate the functionality of the button 
   const fakeIncidentLocations = [
     // West Midlands
-    { id: "demo_loc_001", latitude: 52.486781, longitude: -1.892418 },
-    { id: "demo_loc_002", latitude: 52.475932, longitude: -1.91721 },
-    { id: "demo_loc_003", latitude: 52.501114, longitude: -1.863742 },
-    { id: "demo_loc_004", latitude: 52.412947, longitude: -1.778661 },
-    { id: "demo_loc_005", latitude: 52.586804, longitude: -1.983992 },
+    // { id: "demo_loc_001", latitude: 52.486781, longitude: -1.892418 },
+    // { id: "demo_loc_002", latitude: 52.475932, longitude: -1.91721 },
+    // { id: "demo_loc_003", latitude: 52.501114, longitude: -1.863742 },
+    // { id: "demo_loc_004", latitude: 52.412947, longitude: -1.778661 },
+    // { id: "demo_loc_005", latitude: 52.586804, longitude: -1.983992 },
 
     // London
     { id: "demo_loc_006", latitude: 51.501994, longitude: -0.141612 },
@@ -41,11 +41,11 @@ function App() {
     { id: "demo_loc_015", latitude: 51.594217, longitude: -0.111392 },
 
     // Merseyside
-    { id: "demo_loc_016", latitude: 53.407921, longitude: -2.991104 },
-    { id: "demo_loc_017", latitude: 53.399485, longitude: -2.969322 },
-    { id: "demo_loc_018", latitude: 53.431204, longitude: -2.961588 },
-    { id: "demo_loc_019", latitude: 53.445891, longitude: -2.989706 },
-    { id: "demo_loc_020", latitude: 53.456947, longitude: -2.738615 }
+    // { id: "demo_loc_016", latitude: 53.407921, longitude: -2.991104 },
+    // { id: "demo_loc_017", latitude: 53.399485, longitude: -2.969322 },
+    // { id: "demo_loc_018", latitude: 53.431204, longitude: -2.961588 },
+    // { id: "demo_loc_019", latitude: 53.445891, longitude: -2.989706 },
+    // { id: "demo_loc_020", latitude: 53.456947, longitude: -2.738615 }
   ];
 
   // unique id for every report

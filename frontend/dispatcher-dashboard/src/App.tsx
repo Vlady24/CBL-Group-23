@@ -325,7 +325,7 @@ function App() {
   const activeIncident = selectedIncident || incidents[0];
   const dispatchableFleet = fleet.filter((car) => car.status === "available" || car.status === "patrolling");
   const maxDispatchableCars = dispatchableFleet.length;
-  const newReportNotice = incidents.find(
+  const newReportNotice = allIncidents.find(
     (incident) => incident.id === newReportNoticeId && incident.status === "pending",
   );
   const filteredPoliceForces = policeForces.filter((force) =>
@@ -354,16 +354,18 @@ function App() {
       setShowEmergency(false);
       return null;
     });
+  }, [selectedForce]);
 
-    const latestPendingIncident = incidents.find((incident) => incident.status === "pending");
+  useEffect(() => {
+    const latestPendingIncident = allIncidents.find((incident) => incident.status === "pending");
     setNewReportNoticeId((currentNoticeId) => {
-      const currentNoticeStillVisible = incidents.some(
+      const currentNoticeStillVisible = allIncidents.some(
         (incident) => incident.id === currentNoticeId && incident.status === "pending",
       );
 
       return currentNoticeStillVisible ? currentNoticeId : latestPendingIncident?.id || null;
     });
-  }, [incidents, selectedForce]);
+  }, [allIncidents]);
 
   useEffect(() => {
     Promise.all([
@@ -402,11 +404,7 @@ function App() {
         Number(data.lng),
         policeGeoJsonRef.current,
       );
-      if (!reportForce) {
-        console.log("Ignoring citizen SOS because it could not be matched to a police force boundary.");
-        return;
-      }
-      
+
       // create a new incident card in the "Incidents" tab 
       const dynamicIncident: Incident = {
         id: `INC-${Math.floor(1000 + Math.random() * 9000)}`,
@@ -422,11 +420,10 @@ function App() {
         policeForce: reportForce,
       };
 
-      // Store every report received, but only display the ones within the current Police Force boundary 
+      // Store every report received, and always notify the dispatcher,
+      // regardless of which force is currently selected in the dropdown
       setAllIncidents((prevIncidents) => [dynamicIncident, ...prevIncidents]);
-      if (reportForce === selectedForceRef.current) {
-        setNewReportNoticeId(dynamicIncident.id);
-      }
+      setNewReportNoticeId(dynamicIncident.id);
     });
 
     // Live gps fleet loc updates
@@ -846,6 +843,10 @@ function App() {
   }
 
   function openDispatch(incident: Incident) {
+    if (incident.policeForce && incident.policeForce !== selectedForce) {
+      setSelectedForce(incident.policeForce);
+      setForceSearch(incident.policeForce);
+    }
     setSelectedIncident(incident);
     setOfficersRequired(Math.min(2, Math.max(1, maxDispatchableCars)));
     setShowEmergency(true);
@@ -1035,6 +1036,7 @@ function App() {
           <div className="urgent-alert-box">
             <h2>Urgent: SOS Received</h2>
             <p><strong>ID:</strong> {newReportNotice.id}</p>
+            <p><strong>Police force:</strong> {newReportNotice.policeForce || "Unmatched / outside known boundaries"}</p>
             <p><strong>Type:</strong> {newReportNotice.type}</p>
             <p><strong>Time:</strong> {newReportNotice.time}</p>
             <p><strong>Details:</strong> {newReportNotice.details}</p>

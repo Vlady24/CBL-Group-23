@@ -197,7 +197,7 @@ def run_kmeans(n_clusters=4):
 
     # Save outputs
     #lsoa_features.to_csv("algorithms_for_solution/lsoa_features.csv", index=False)
-    #cl.to_csv(str(_BASE_DIR.parent / "database" / "lsoa_features_with_clusters.csv"), index=False)  # needed for ratio output, and save in database folder, so uncomment for that purpose
+    cl.to_csv(str(_BASE_DIR.parent / "database" / "lsoa_features_with_clusters.csv"), index=False)  # needed for ratio output, and save in database folder, so uncomment for that purpose
 
     print ("K-Means calculation complete. Files saved")
 
